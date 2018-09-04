@@ -50,7 +50,10 @@ the entry would look like this: `10 1 1 1986.5 1 0 3 3`
 A more detailed breakdown for each column/field in each individual row in the file 
 is given here:
 
-* **column 1**: unique individual identifer, it must be a positive, unique integer for each row  
+* **column 1**: unique individual identifer, it must be a positive, unique integer for each row. (SINCE WE ARE RUNNING THIS ALL
+THROUGH A PYTHON WRAPPER, IT SEEMS TO ME THAT THE IDENTIFIER SHOULD BE ANY STRING (WITH NO WHITESPACE) OF COURSE.  LET THE PYTHON WRAPPER 
+THEN ASSIGN A UNIQUE INTEGER TO EACH INDIVIDUAL, AND KEEP A RECORD OF WHO IS WHO SO THAT AT THE END THE SAMPLED PEDIGREES
+WILL COME BACK WITH THE ORIGINAL IDENTIFIERS.  OTHERWISE THERE WILL BE MUCH GNASHING OF TEETH.)
 * **column 2**: an integer flag saying whether the individual is observed (i.e. whether genotype
 data are available for it)  Must be 1 or 0,  corresponding to yes or no.  
 * **column 3**: sex of the individual: 0, 1, or 2. - corresponding to unknown, male or female.

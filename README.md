@@ -1,15 +1,31 @@
 # pedfac
-A factor graph based MCMC pedigree sampler
+A factor graph based Markov chain Monte Carlo (MCMC) pedigree sampler
 
-pedFac.py is a wrapper script that oversees the complete workflow of Markov Chain based pedigree sampler.
+pedFac.py is a wrapper script that oversees the complete workflow of the MCMC based pedigree sampler.
 
 ## Requirement
 
-This package requires python v 3.0+ to be installed in either linux or mac OS environment. Check out : [conda.io/miniconda.html](conda.io/miniconda.html) to install or update your local python.    
+This package requires python v 3.0+ to be installed in either a Linux or a Mac OS environment. Check out : [conda.io/miniconda.html](conda.io/miniconda.html) to install or update your local python.    
 
-The next step is to install numpy pkg: `conda install numpy`  and install this repo by: `git clone https://github.com/ngthomas/pedfac.git`.   
+After python v 3.0+ is installed, the next step is to ensure that the python package `numpy` is installed.  Do so with
 
-You can perform a sample test run by running as follows: `cd pedfac; python bin/run-pedfac -i example/case_0/ -n 5`   
+```sh
+conda install numpy
+```
+
+Once python and its requisite packages are installed, you can install the pedfac software by cloning this
+GitHub repoistory, like so:
+
+```sh
+git clone https://github.com/ngthomas/pedfac.git
+```
+
+You can perform a test run as follows: 
+
+```sh
+cd pedfac
+python bin/run-pedfac -i example/case_0/ -n 5
+```
 
 ## About run-pedfac
 

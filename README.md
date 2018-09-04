@@ -3,7 +3,7 @@ A factor graph based Markov chain Monte Carlo (MCMC) pedigree sampler
 
 pedFac.py is a wrapper script that oversees the complete workflow of the MCMC based pedigree sampler.
 
-## Requirement
+## Requiremens and Installation
 
 This package requires python v 3.0+ to be installed in either a Linux or a Mac OS environment. Check out : [conda.io/miniconda.html](conda.io/miniconda.html) to install or update your local python.    
 
@@ -29,25 +29,36 @@ python bin/run-pedfac -i example/case_0/ -n 5
 
 ## About run-pedfac
 
-This Python script expects the user to provide the path to a valid space separate genotype file named "genotype.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns the summary and also the details of the sampled pedigrees.  
+This Python script expects the user to provide the path to a valid space-separated genotype file named "genotype.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns a summary of the MCMC output and also details of the sampled pedigrees.  
 
 ### About the genotype file:
-The genotype file is a space separate file that contains individual's genotype and meta information.   
-Each row is an individual entry with its associate genotype information, in the order as follows: unique indiv ID | is the indiv observed? | sex of individual | birth year | genotype(s) information.    
-  
-For example, for an observed male indiv who   
-    - is born in the middle of 1986  
-    - with heterozygous allele of "1" and "0" for a locus and  
-    - homogygous allele of "3" for another locus,  
-the entry would look like this: 10 1 1 1986.5 1 0 3 3   
 
-This is more of a detailed breakdown for each column field:  
-column 1: unique indiv ID - a positive unique integer for each row  
-column 2: is the individual observed? 1 or 0 - corresponds to yes or no.  
-column 3: sex of the individual: 0, 1, 2. - corresponds to unknown, male or female   
-column 4: birth year: flow value. allow decimal value e.g. 1994.10  
-column 5+6(7+8)....(x+(x+1)): genotype information of a 'diploid organism'. Must provide the alleles info in one of the following forms:  
-    - integer. If genotype information is not known, use -1. e.g -1 -1. If it is a biallelic SNP, we recommend using 0,1.  
+The genotype file is a space-separated file that contains genotype and metadata information
+from the individuals whose pedigree is to be determined.   
+Each line in the file holds information about a single individual ordered as follows: 
+
+- unique individual id | is the indiv observed? | sex of individual | birth year | genotype(s) information.    
+  
+For example, for an observed male individual who
+
+- is born in the middle of 1986  
+- with heterozygous allele of "1" and "0" for the first locus and  
+- homogygous allele of "3" for the second locus,  
+
+the entry would look like this: `10 1 1 1986.5 1 0 3 3`   
+
+A more detailed breakdown for each column/field in each individual row in the file 
+is given here:
+
+* **column 1**: unique individual identifer, it must be a positive, unique integer for each row  
+* **column 2**: an integer flag saying whether the individual is observed (i.e. whether genotype
+data are available for it)  Must be 1 or 0,  corresponding to yes or no.  
+* **column 3**: sex of the individual: 0, 1, or 2. - corresponding to unknown, male or female.
+* **column 4**: birth year: a real number value allowing a decimal point,  e.g. 1994.10  
+* **column 5+6 (7+8) ... (x+(x+1))**: columns holding the genotype information of a 'diploid organism'. Each locus occupies
+two columns (one for each gene copy). The allele information must be giving in one of the following forms:  
+    - As an integer. If genotype information is not known, use -1. e.g -1 -1. If data are from biallelic SNPs, we recommend using 0
+    for one allele and 1 for the other.  
     - string for both alleles for any number of loci. For string based genotype i.e. haplotype, this program recognizes standard A, T, C, and G bases, e.g ACAAT ATCAA. If the genotype info is not known, use N e.g. N N.  
     - comma-separate genotype class and posterior probabilty. For now, we only accept biallelic genotype case with 3 possible classes - 0, 1, 2. Let 0 or 2 be the homozygous case of possessing the more common or more rare allele, respectively. Let 1 be the heterozygous case. The first column is a string of comma-separate genotype classes (i.e. 0,1,2) followed by a column of their respective genotype probability.  
     e.g 0,1,2 0.9,0.3,0.2   

@@ -26,6 +26,7 @@ You can perform a test run as follows:
 cd pedfac
 python bin/run-pedfac -i example/case_0/ -n 5
 ```
+Doing so will create an output file in:...
 
 ## About run-pedfac
 

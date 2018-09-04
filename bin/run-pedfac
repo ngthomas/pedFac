@@ -1,0 +1,400 @@
+#!/usr/bin/env python
+
+# Requirement:
+# version required Python3
+# numpy should be > v. 1.8
+
+#import sys,re, string, gc
+import os, argparse, subprocess
+import math, random
+import numpy as np
+#from scipy.stats import nbinom, beta
+#import random
+
+def check_positive_int(value):
+    ivalue = int(value)
+    if ivalue <= 0:
+        raise argparse.ArgumentTypeError(" %s is an invalid positive int value. " % value)
+    return ivalue
+
+def check_positive_float(value):
+    fvalue = float(value)
+    if fvalue <= 0:
+        raise argparse.ArgumentTypeError(" %s is an invalid positive float value. " % value)
+    return fvalue
+
+def check_nonneg_int(value):
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(" %s is an invalid non-negative int value. " % value)
+    return ivalue
+
+def check_unit(value):
+    fvalue = float(value)
+    if (fvalue < 0) | (fvalue > 1):
+        raise argparse.ArgumentTypeError(" %s is an invalid unit value. " % value)
+    return fvalue
+
+def read_write_geno(opts):
+
+    genoArr = np.genfromtxt(opts.inputPath+"/genotype.txt",
+                            dtype=None, delimiter=" ",
+                            encoding=None)
+    #genoArr = np.genfromtxt(opts.inputPath+"/tem/genotype_case1.txt",
+                            #dtype=None, delimiter=" ",
+                            #encoding=None)
+    # by default, genfromtxt checks whether the file geno.txt exists and whether all row entry has
+    # the same number of columns
+
+    # column 1: check all ID are positive and unique integer; gather maxID
+    try:
+        genoArr['f0'] = genoArr['f0'].astype(int)
+    except ValueError:
+        print("TypeError: Column 1 of geno.txt contains string element. Expect integer values as unique ID. \n")
+        raise
+
+    unq, unq_idx, unq_cnt = np.unique(genoArr['f0'], return_inverse=True, return_counts=True)
+    dup_ids = unq[unq_cnt > 1]
+
+    if dup_ids.size >0:
+        raise TypeError("Duplicated ID - column 1 - are found in geno.txt i.e. %s "%dup_ids)
+
+    read_write_geno.maxID = max(genoArr['f0'])
+    read_write_geno.nIndiv = genoArr['f0'].shape[0]
+    
+    # column 2: only allow 0 or 1
+    num_match = sum(np.isin(genoArr['f1'], [0,1]))
+    if num_match != read_write_geno.nIndiv:
+        raise ValueError("The second column - is_it_observed? - only allows value of 0 or 1. We found values of %s."%(np.unique(genoArr['f1'])))
+    
+    read_write_geno.nObsIndiv = sum(genoArr['f1'])
+
+    # column 3: sex of indiv: only allow 0, 1, 2
+    num_match = sum(np.isin(genoArr['f2'], [0,1,2]))
+    if num_match != read_write_geno.nIndiv:
+        raise ValueError("The third column - sex of indiv - only allows value of 0, 1 or 2. We found values of %s."%(np.unique(genoArr['f2'])))
+
+    # column 4: birth year: make sure it is all positive. Find the min and max of birth year
+    try:
+        genoArr['f3'].astype(float)
+    except ValueError:
+        print("TypeError: The fourth column of geno.txt contains string element. Expect only float values. \n")
+        raise
+
+    read_write_geno.minYr = min(genoArr['f3'])
+    read_write_geno.maxYr = max(genoArr['f3'])
+    read_write_geno.generation = np.floor((read_write_geno.maxYr-genoArr['f3'])/opts.minAge).astype(int)
+    
+    read_write_geno.nGen = max(read_write_geno.generation)+opts.maxGen+1
+    
+    read_write_geno.isFounder = [0] * read_write_geno.nIndiv
+    if opts.maxGen == 0:
+        read_write_geno.isFounder = [1 if a1 == max(read_write_geno.generation) else 0 for a1 in read_write_geno.generation]
+    
+    
+    
+    
+    if opts.observeFrac == -1:
+        read_write_geno.observeFrac = np.array([-1] * read_write_geno.nGen)
+    else:
+        unq_gen = np.unique(read_write_geno.generation)
+        read_write_geno.observeFrac = np.array([0] * read_write_geno.nGen,dtype="float")
+        np.put(read_write_geno.observeFrac, unq_gen, [opts.observeFrac]*len(unq_gen))
+    
+    read_write_geno.nSNP = int((len(genoArr[0])-4)/2)
+    # column 5...n: for the first pass, just test
+    read_write_geno.afreq = np.empty([read_write_geno.nSNP,1])
+    
+    read_write_geno.geno = np.empty([read_write_geno.nSNP, read_write_geno.nIndiv],
+                             dtype="U25")
+    
+    for i in range(1,read_write_geno.nSNP+1):
+        
+        col1, col2 = 4+((i-1)*2), 5+((i-1)*2)
+        all_alleles = np.concatenate((genoArr['f%s'%col1],genoArr['f%s'%col2]))
+
+        if ('int' in str(all_alleles.dtype)) | ('float' in str(all_alleles.dtype)):
+            alleles_str = np.array(["%s"%a for a in all_alleles])
+        else:
+            alleles_str = all_alleles
+
+        # keep record for check for -1 and posterior base information
+        # if it is btye based str
+        posterior_mark = np.core.defchararray.rfind(alleles_str, ',')
+        missing_mark = np.core.defchararray.rfind(alleles_str, '-1')
+        post_head = np.core.defchararray.rfind(alleles_str, '0,1,2')
+        N_mark = (alleles_str=='N')*1-1
+        
+        # check to see whether the two genotype columns are consistent 
+        # or match one another in the case of 'N' and '-1'
+        inconsist_ls = np.where(np.add(N_mark!=-1,missing_mark!=-1).reshape(2,read_write_geno.nIndiv).sum(axis=0) == 1)
+        
+        if len(inconsist_ls[0]) >0:
+            raise ValueError("Found inconsistent missing genotype report in the %s-th row of the %s-th SNP "%(inconsist_ls[0]+1,i))
+        
+
+        alleles_class = alleles_str[(posterior_mark==-1)&(missing_mark==-1)&
+                                    (N_mark==-1)]
+        # check whether it's biallelic (remember to get rid of -1)
+
+        unq, unq_idx, unq_cnt = np.unique(alleles_class, return_inverse=True, return_counts=True)
+        
+        
+        # if it is biallelic class ,
+        
+        # in the case of biallelic class with only posterior prob entries
+        if len(unq) == 0:
+            # assume that there are only three posterior probs per entry
+            posterior_content = np.core.defchararray.split( alleles_str[(posterior_mark!=-1)&(post_head==-1)],",")
+            
+            size_post = np.unique([len(i) for i in posterior_content])
+            if len(size_post) != 1:
+                raise TypeError("The posterior prob in geno.txt are expected to have 3 numeric entries separated by comma, instead the length of posterior prob entries provided are: %s ."%size_post)
+                
+            unnorm_post = np.matrix(np.concatenate(posterior_content,),
+                                    dtype="f8").reshape(len(posterior_content),3)
+            norm_post = unnorm_post/(unnorm_post.sum(axis=1))
+            
+            colsum_post = norm_post.sum(axis=0)
+            
+            read_write_geno.afreq[i-1] = (colsum_post[0,2]+0.5*colsum_post[0,1])/len(posterior_content)
+            
+            read_write_geno.geno[i-1] = [np.array2string(np.array(a)[0], 
+                                         formatter={'float_kind':lambda x: "%.2f" % x},
+                                         separator=',',
+                                         prefix='').lstrip('[').rstrip(']') for a in norm_post]
+    
+        
+        if len(unq) == 1:
+            read_write_geno.afreq[i-1] = 0
+            read_write_geno.geno[i-1] = ['0']*read_write_geno.nIndiv
+            
+            
+        if len(unq) == 2:
+            read_write_geno.afreq[i-1] = unq_cnt[1]/sum(unq_cnt)
+            gentype_tem = np.multiply(
+                    [1 if a1 in unq else 0 for a1 in alleles_str],
+                    [1 if a2 == unq[0] else 2 for a2 in alleles_str]
+                        ).reshape(2,read_write_geno.nIndiv).sum(axis=0)-2
+            
+            read_write_geno.geno[i-1] = ['3' if a1 == -2 else str(a1) for a1 in gentype_tem]
+            
+        # for now we only allow method 1 to be on -
+        # if nclass = 2; that's great but nclass > 2  (multiallelic marker), then
+        # will group markers into 2 possible groups
+        # obtain allelic frequency and genotype class
+        if len(unq) > 2:
+            n_passAllele = len(alleles_class)
+            den_cnt = unq_cnt/n_passAllele
+            indx_order = np.argsort(den_cnt)
+            sort_order = np.sort(den_cnt)
+
+            #!!!!! need to change this to introduce new multiallelic handling methods            
+            if opts.haploMethod >= 0:
+            
+                cum_cnt = np.cumsum(sort_order[0:(len(unq)-1)])+sort_order[-1]
+                
+                if sort_order[-1] >= 0.5:
+                    
+                    read_write_geno.afreq[i-1] = 1-sort_order[-1]
+                    gentype_tem = np.multiply(
+                        [1 if a1 in unq else 0 for a1 in alleles_str],
+                        [1 if a2 == unq[indx_order[-1]] else 2 for a2 in alleles_str]
+                            ).reshape(2,read_write_geno.nIndiv).sum(axis=0)-2
+                else:
+                    group1_indx = min(np.arange(1,len(unq))[cum_cnt >= 0.5])
+                    new_group0 = np.append(unq[indx_order[0:(group1_indx)]],
+                                                          unq[indx_order[-1]])
+                    
+                    read_write_geno.afreq[i-1] = 1-cum_cnt[group1_indx-1]
+                    gentype_tem = np.multiply(
+                        [1 if a1 in unq else 0 for a1 in alleles_str],
+                        [1 if a2 in new_group0 else 2 for a2 in alleles_str]
+                            ).reshape(2,read_write_geno.nIndiv).sum(axis=0)-2
+                    
+                read_write_geno.geno[i-1] = ['3' if a1 == -2 else str(a1) for a1 in gentype_tem]
+        
+    
+    #write 
+    
+    priorFile = open("".join([opts.outputPath,"/prior.txt"]), 'w')
+                
+    priorFile.write("".join(["nIndiv ", str(read_write_geno.nIndiv), "\n",
+                             "nObsIndiv ", str(read_write_geno.nObsIndiv), "\n",
+                             "nGen ", str(read_write_geno.nGen), "\n",
+                             "nSNP ", str(read_write_geno.nSNP), "\n",
+                             "nMar 0\n",
+                             "maxID ", str(read_write_geno.maxID+1), "\n",
+                             "aFreq ", " ".join([np.array2string(np.array(a)[0],formatter={'float_kind':lambda x: "%.2f" % x}) for a in read_write_geno.afreq]), "\n",
+                             "epsilon ", " ".join([str(opts.genoerr)]*read_write_geno.nSNP), "\n",
+                             "obsFrac ",
+                             " ".join([np.array2string(np.array(a),formatter={'float_kind':lambda x: "%.2f" % x}) for a in read_write_geno.observeFrac]), "\n",
+                             "maxMarrGap ", str(int(np.ceil(opts.maxAge/opts.minAge))), "\n",
+                             "maxUnobsLayer ", str(opts.maxUnobs)] ))
+    
+    
+    # writing the geno file
+    ##intermed layout: # unique indiv ID  [positive integer] | isObserved (0 - no, 1 - yes)|  sex [0,1,2 - 0 to be unknown, 1 - male, 2 - female] | generation (0 - the most recent,...) | isfounder (0 - no ,1 - Yes) | Genotype Value [0,1,2,3] - 3: uncertain or missing |
+    # suggestion: might need to add sub-generation (it is effective to separate indivs from the parental generation that might be too old to be consider as parents)
+
+    obsGeno = open("".join([opts.outputPath,"/geno.txt"]), 'w')
+    
+    for eachC in range(0,read_write_geno.nIndiv):
+        obsGeno.write(" ".join([str(genoArr[eachC][0]),
+                                str(genoArr[eachC][1]),
+                                str(genoArr[eachC][2]),
+                                str(read_write_geno.generation[eachC]),
+                                str(read_write_geno.isFounder[eachC])])+
+            " "+" ".join(read_write_geno.geno.T[eachC])+"\n")
+                      
+    
+    
+    
+            
+        
+
+
+if __name__ == '__main__':
+
+    fulldoc = '''
+
+pedFac.py is a wrapper script that oversees the complete workflow of Markov Chain based pedigree sampler.
+
+This Python script expects the user to provide the path to a valid space separate genotype file named "genotype.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns the summary and also the details of the sampled pedigrees.
+
+About the genotype file:
+The genotype file is a space separate file that contains individual's genotype and meta information.
+Each row is an individual entry with its associate genotype information, in the order as follows: unique indiv ID | is the indiv observed? | sex of individual | birth year | genotype(s) information.
+
+For example, for an observed male indiv who
+    - is born in the middle of 1986
+    - with heterozygous allele of "1" and "0" for a locus and
+    - homogygous allele of "3" for another locus,
+the entry would look like this: 10 1 1 1986.5 1 0 3 3
+
+This is more of a detailed breakdown for each column field:
+column 1: unique indiv ID - a positive unique integer for each row
+column 2: is the individual observed? 1 or 0 - corresponds to yes or no.
+column 3: sex of the individual: 0, 1, 2. - corresponds to unknown, male or female
+column 4: birth year: flow value. allow decimal value e.g. 1994.10
+column 5+6(7+8)....(x+(x+1)): genotype information of a 'diploid organism'. Must provide the alleles info in one of the following forms:
+    - integer. If genotype information is not known, use -1. e.g -1 -1. If it is a biallelic SNP, we recommend using 0,1.
+    - string for both alleles for any number of loci. For string based genotype i.e. haplotype, this program recognizes standard A, T, C, and G bases, e.g ACAAT ATCAA. If the genotype info is not known, use N e.g. N N.
+    - comma-separate genotype class and posterior probabilty. For now, we only accept biallelic genotype case with 3 possible classes - 0, 1, 2. Let 0 or 2 be the homozygous case of possessing the more common or more rare allele, respectively. Let 1 be the heterozygous case. The first column is a string of comma-separate genotype classes (i.e. 0,1,2) followed by a column of their respective genotype probability.
+    e.g 0,1,2 0.9,0.3,0.2
+    (This feature is not available yet --) As for the case of dealing with multiallelic classes (not avail yet), you will be only need to provide the top four (if any) genotype classes. Any remaining prob will be spread uniformly for other unlisted classes,
+    e.g. AA|AT,AC|AT,AA|AC,AT|AT 0.5,0.1,0.1,0.1
+
+Optional marker input file (only for biallelic markers) - "marker_info.txt":
+This space separate input file -- "marker_info.txt" --- holds meta information regarding the status of the genotype markers.
+
+The first line of the file begins with the tag "name" following by names of locus. (space separated)
+One can choose any of the following description (if any) associated with the markers:
+
+- gerror :  genotype error. positive value from 0 to 1. It describes the rates the genotype error with the most simplistic model - alpha model. prob of (1-a/n) for observed genotype class. If genotype posterior value is already reported, this info is going to be ignored.
+
+- afreq: allelic frequency of the alternative allele - "1", as opposed to "0". Positive float value from 0 to 1.
+
+e.g.
+name SNP_1 SNP_2 SNP_3 SNP_4
+gerror 0.2 0.2 0.2 0.2
+afreq 0.01 0.04 0.1 0.23
+
+About this wrapper parameters:
+
+    -i/--inputPath: directory path that contains the input "geno.txt" and optional "marker_info.txt". String. Required.
+    -o/--outputPath: directory path to store intermed and final output files. String. Optional. If not specified, use input path
+
+    Regarding sampling:
+    -r/--randomSeed: random seed to pass on sampler. Positive integer; a randomly generated value as default
+    -n/--nIter: number of sampling iteration. Positive integer; 1 as default
+    -c/--cyclicChoice: choices of handling loops. [0 (default), 1, or 2].
+        0 - not allowing loops;
+        1 - throttle method;
+        2 - decimation method
+
+    -f/--observeFrac: assumed sampling fraction. Float value from 0 to 1; 0.8 as default. However, if you don't want to impose any prior knowledge about sampling fraction, use the value of -1.
+
+    -u/--maxUnobs: maximum number of unobserved individuals allowed in between any two individuals. Nonnegative integer; 1 as default
+    -m/--maxGen: number of predecessor generation(s) considered beyond the earliest observed generation. Nonnegative integer; 0 as default. Setting it as 0 means that individuals of the earliest observed generation are treated as founders.
+
+    Regarding specie life history:
+    -s/--minAge: minimal age of sexual maturation or fecundity (in year). Positive float value; 1 as default
+    -a/--maxAge: maximum age of sexual maturation or fecundity (in year). Positive float value; 1 as default
+
+    Regarding genotype marker: (need to generate intermediate summary files of how markers are compressed/collapsed )
+    -hm/--haploMethod: Selected method in the case of handling multiallelic markers. Positive integer 0 - 2; 0 as default.
+        0 - taking the most informative allele whose frequency is closest to 0.5
+        1 - (not avail) deconstructing haplotype into a set of nucleotide units
+        2 - (not avail) reduce the multiallelic basis into n class of binomial switches
+    -g/--genoerr: Assumed background genotype error rate in the form of epsilon. Float value from 0 to 1; 0.02 as default. If the genotype error row - 'gerror' of marker_info.txt is provided, this param will be overridden.
+
+'''
+
+    parser = argparse.ArgumentParser(description='PedFac: learning acyclic multigenerational pedigrees via factor graphs')
+
+    parser.add_argument('-i', '--inputPath', required=True, type=str, help='directory path that contains the input "geno.txt" and optional "marker_info.txt". String. Required')
+    parser.add_argument('-o', '--outputPath', required=False, default="default", type=str, help='directory path to store intermed and final output files. String. Optional. If not specified, use input path')
+
+    #Regarding sampling:
+
+    parser.add_argument('-r', '--randomSeed', required=False, default=0, type = check_positive_int, help='random seed to pass on sampler. Positive integer; a randomly generated value as default')
+    parser.add_argument('-n', '--nIter', required=False, default=1, type = check_positive_int, help='number of sampling iteration. Positive integer > 0; 1 as default')
+    parser.add_argument('-c', '--cyclicChoice', required=False, default=0, type = int, choices=range(0,3), help='choices of handling loops. [0 (default), 1, or 2]. 0 - not allowing loops; 1 - throttle method; 2 - decimation method')
+
+    parser.add_argument('-f', '--observeFrac', required=False, default=0.8, type = check_unit, help='assumed sampling fraction. positive float value from 0 to 1; 0.8 as default. However, if you don\'t want to impose any prior knowledge about sampling fraction, use the value of -1.')
+
+
+    parser.add_argument('-u', '--maxUnobs', required=False, default=1, type = check_nonneg_int, help='maximum number of unobserved individuals allowed in between any two individuals.')
+    parser.add_argument('-m', '--maxGen', required=False, default=0, type = check_nonneg_int, help='number of predecessor generation(s) considered beyond the earliest observed generation. Nonnegative integer; 0 as default. Setting it as 0 means that individuals of the earliest observed generation are treated as founders.')
+
+
+    #Regarding specie life history:
+    parser.add_argument('-s', '--minAge', required=False, default=1, type = check_positive_float, help='minimal age of sexual maturation or fecundity (in year). Positive float value > 0; 1 as default')
+    parser.add_argument('-a', '--maxAge', required=False, default=1, type = check_positive_float, help='maximum age of sexual maturation or fecundity (in year). Positive float value > 0; 1 as default')
+
+    #Regarding genotype marker: (need to generate intermediate summary files of how markers are compressed/collapsed )
+    parser.add_argument('-hm', '--haploMethod', required=False, default=0, type = int, choices=range(0, 3),  help='Selected method in the case of handling multiallelic markers. Positive integer 0 - 2; 0 as default. Methods: 0 - taking the most informative allele whose frequency is closest to 0.5; 1 - deconstructing haplotype into a set of nucleotide units; 2 - reduce the multiallelic basis into n class of binomial switches')
+    parser.add_argument('-g', '--genoerr', required=False, default=0.02, type = check_unit,  help='Assumed background genotype error rate in the form of epsilon. Float value from 0 to 1; 0.02 as default. If the genotype error row - "gerror" of marker_info.txt is provided, this param will be overridden.')
+    
+    
+    opts = parser.parse_args()
+    
+
+    randF = open("".join([opts.outputPath,"/rand"]), 'w')
+    random.seed(opts.randomSeed)
+    randF.write(str(
+            math.ceil((10**math.ceil(1+random.random()*7))*random.random()) 
+            )+" "+str(
+            math.ceil((10**math.ceil(1+random.random()*7))*random.random()) 
+            ))
+
+    if opts.outputPath == "default":
+        opts.outputPath = opts.inputPath
+
+    path = opts.outputPath + "/out/"
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # 1. check whether geno.txt is in the right format, parse out for information
+    # to generate genotype.txt and prior.txt
+    
+    print(os.path.dirname(__file__))
+    
+    
+    print("Reading genotype.txt ...\n")
+    read_write_geno(opts)
+    
+    # 2. run pedFactory 
+    #os.chdir(opts.outputPath)
+    print("Running pedFactory ...\n")
+    print(str(subprocess.check_output([os.path.dirname(__file__)+
+                            "/pedigraph -d "+ opts.outputPath +
+                            " -n "+str(opts.nIter)+
+                            " -r "+ opts.outputPath+"/rand"],
+        shell=True),'utf-8'))
+
+    # 3. clean out the pedigree results
+    subprocess.check_output(["bash "+os.path.dirname(__file__)+"/cleangeno.sh "+opts.outputPath+"/out/ped.txt > "+opts.outputPath+"/out/ped_clean.txt"],shell=True)
+
+

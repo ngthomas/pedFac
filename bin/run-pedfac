@@ -361,13 +361,7 @@ About this wrapper parameters:
     opts = parser.parse_args()
     
 
-    randF = open("".join([opts.outputPath,"/rand"]), 'w')
-    random.seed(opts.randomSeed)
-    randF.write(str(
-            math.ceil((10**math.ceil(1+random.random()*7))*random.random()) 
-            )+" "+str(
-            math.ceil((10**math.ceil(1+random.random()*7))*random.random()) 
-            ))
+
 
     if opts.outputPath == "default":
         opts.outputPath = opts.inputPath
@@ -375,26 +369,46 @@ About this wrapper parameters:
     path = opts.outputPath + "/out/"
     if not os.path.exists(path):
         os.makedirs(path)
+        
+    randF = open("".join([opts.outputPath,"/rand"]), 'w')
+    random.seed(opts.randomSeed)
+    random1 = math.ceil((2**math.ceil(1+random.random()*7))*random.random())
+    random2 = math.ceil((2**math.ceil(1+random.random()*7))*random.random())
+    random1 =7579545; random2=2590
+    
+    
+    if random1>random2:
+        randF.write(str(random2)+" "+str(random1))
+    else:
+        randF.write(str(random1)+" "+str(random2))
 
     # 1. check whether geno.txt is in the right format, parse out for information
     # to generate genotype.txt and prior.txt
-    
-    print(os.path.dirname(__file__))
-    
     
     print("Reading genotype.txt ...\n")
     read_write_geno(opts)
     
     # 2. run pedFactory 
     #os.chdir(opts.outputPath)
-    print("Running pedFactory ...\n")
-    print(str(subprocess.check_output([os.path.dirname(__file__)+
+    print("Running pedFactory ...")
+    runPedigraph = "".join([os.path.dirname(__file__)+
                             "/pedigraph -d "+ opts.outputPath +
                             " -n "+str(opts.nIter)+
-                            " -r "+ opts.outputPath+"/rand"],
-        shell=True),'utf-8'))
+                            " -r "+ opts.outputPath+"/rand"])
+            
+    print("Run this code: "+runPedigraph+"\n")
+    
+    ###Something is wrong!!!!!!
+    #os.system("echo "+runPedigraph+" > "+opts.outputPath+"/runSample")
+    #os.system("bash "+opts.outputPath+"/runSample")
+    #print(str(subprocess.check_output("bash "+opts.outputPath+"/runSample", shell=True),'utf-8'))
+    #print(str(subprocess.check_output(runPedigraph, shell=True),'utf-8'))
+
 
     # 3. clean out the pedigree results
-    subprocess.check_output(["bash "+os.path.dirname(__file__)+"/cleangeno.sh "+opts.outputPath+"/out/ped.txt > "+opts.outputPath+"/out/ped_clean.txt"],shell=True)
+    print("Clean results ...")
+    cleanScrip = "bash "+os.path.dirname(__file__)+"/cleangeno.sh "+opts.outputPath+"/out/ped.txt > "+opts.outputPath+"/out/ped_clean.txt"
+    print("Run this cmd: "+cleanScrip)
+    #subprocess.check_output(["bash "+os.path.dirname(__file__)+"/cleangeno.sh "+opts.outputPath+"/out/ped.txt > "+opts.outputPath+"/out/ped_clean.txt"],shell=True)
 
 

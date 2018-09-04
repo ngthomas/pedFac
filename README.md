@@ -60,7 +60,9 @@ two columns (one for each gene copy). The allele information must be giving in o
     - *As an integer*. If genotype information is not known, use -1. e.g -1 -1. If data are from biallelic SNPs, we recommend using 0
     for one allele and 1 for the other.  
     - *string for both alleles for any number of loci*. For string based genotype i.e. haplotype, this program recognizes standard A, T, C, and G bases, e.g ACAAT ATCAA. If the genotype info is not known, use N e.g. `N N`. (NOT CLEAR THOMAS, IS THIS REALLY FOR HAPLOTYPES? DO WE USE JUST ONE COLUMN FOR ALL MARKERS? NEED TO TALK THIS OVER).  
-    - *comma-separated genotype classes and associated posterior probabilties*. (TECHNICALLY THESE ARE NORMALIZED LIKELIHOODS, NOT POSTERIOR PROBS, NO?) For now, we only accept the case of biallelic genotypes with 3 possible genotypic classes - 0, 1, 2.  `0` represents a homozygote for the major allele, `2` represents a homozygote for the minor allele, and `1` represents a heterozygote.  There is one column for each locus, and it is a string of comma-separate genotype classes (i.e. 0,1,2) followed by a string of their respective genotype probabilities.  For example `0,1,2 0.9,0.3,0.2`   
+    - *comma-separated genotype classes and associated posterior probabilties*. (TECHNICALLY THESE ARE NORMALIZED LIKELIHOODS, NOT POSTERIOR PROBS, NO?) For now, we only accept the case of biallelic genotypes with 3 possible genotypic classes - 0, 1, 2.  `0` represents a homozygote for the major allele, `2` represents a homozygote for the minor allele, and `1` represents a heterozygote.  There are still
+    two space-separated columns for each locus. The first is a string of comma-separated genotype classes (i.e. `0,1,2`) and
+    the second is a comma-separated string with their respective genotype likelihoods.  For example `0,1,2 0.9,0.3,0.2`   
     - (This feature is not available yet --) For dealing with multiallelic classes (not avail yet), you will be only need to provide the 
     top four (if any) genotype classes. Any remaining prob will be spread uniformly over the other unlisted
     classes, e.g. `AA|AT,AC|AT,AA|AC,AT|AT 0.5,0.1,0.1,0.1`

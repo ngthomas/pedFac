@@ -3,7 +3,7 @@ A factor graph based Markov chain Monte Carlo (MCMC) pedigree sampler
 
 pedFac.py is a wrapper script that oversees the complete workflow of the MCMC based pedigree sampler.
 
-## Requiremens and Installation
+## Requirements and Installation
 
 This package requires python v 3.0+ to be installed in either a Linux or a Mac OS environment. Check out : [conda.io/miniconda.html](conda.io/miniconda.html) to install or update your local python.    
 
@@ -31,7 +31,7 @@ python bin/run-pedfac -i example/case_0/ -n 5
 
 This Python script expects the user to provide the path to a valid space-separated genotype file named "genotype.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns a summary of the MCMC output and also details of the sampled pedigrees.  
 
-### About the genotype file:
+### The genotype file:
 
 The genotype file is a space-separated file that contains genotype and metadata information
 from the individuals whose pedigree is to be determined.   
@@ -60,26 +60,34 @@ two columns (one for each gene copy). The allele information must be giving in o
     - As an integer. If genotype information is not known, use -1. e.g -1 -1. If data are from biallelic SNPs, we recommend using 0
     for one allele and 1 for the other.  
     - string for both alleles for any number of loci. For string based genotype i.e. haplotype, this program recognizes standard A, T, C, and G bases, e.g ACAAT ATCAA. If the genotype info is not known, use N e.g. N N.  
-    - comma-separate genotype class and posterior probabilty. For now, we only accept biallelic genotype case with 3 possible classes - 0, 1, 2. Let 0 or 2 be the homozygous case of possessing the more common or more rare allele, respectively. Let 1 be the heterozygous case. The first column is a string of comma-separate genotype classes (i.e. 0,1,2) followed by a column of their respective genotype probability.  
-    e.g 0,1,2 0.9,0.3,0.2   
-    (This feature is not available yet --) As for the case of dealing with multiallelic classes (not avail yet), you will be only need to provide the top four (if any) genotype classes. Any remaining prob will be spread uniformly for other unlisted classes,   
-    e.g. AA|AT,AC|AT,AA|AC,AT|AT 0.5,0.1,0.1,0.1   
+    - comma-separated genotype class and posterior probabilty. For now, we only accept the case of biallelic genotypes with 3 possible genotypic classes - 0, 1, 2.  `0` represents a homozygote for the major allele, `2` represents a homozygote for the minor allele, and `1` represents a heterozygote.  There is one column for each locus, and it is a string of comma-separate genotype classes (i.e. 0,1,2) followed by a string of their respective genotype probabilities.  For example `0,1,2 0.9,0.3,0.2`   
+    - (This feature is not available yet --) For dealing with multiallelic classes (not avail yet), you will be only need to provide the 
+    top four (if any) genotype classes. Any remaining prob will be spread uniformly over the other unlisted
+    classes, e.g. `AA|AT,AC|AT,AA|AC,AT|AT 0.5,0.1,0.1,0.1`
   
-Optional marker input file (only for biallelic markers) - "marker_info.txt":  
-This space separate input file -- "marker_info.txt" --- holds meta information regarding the status of the genotype markers.  
+### Optional marker input file: "marker_info.txt":  
 
-The first line of the file begins with the tag "name" following by names of locus. (space separated)  
-One can choose any of the following description (if any) associated with the markers:  
+This space-separated input file -- "marker_info.txt" --- can only be given for biallelic marker data.  It holds
+metadata information regarding the status of the genotype markers.  
 
-- gerror :  genotype error. positive value from 0 to 1. It describes the rates the genotype error with the most simplistic model - alpha model. prob of (1-a/n) for observed genotype class. If genotype posterior value is already reported, this info is going to be ignored.   
+The first line of the file begins with the tag "name" followed by a space-separated list of the names of the loci.
 
-- afreq: allelic frequency of the alternative allele - "1", as opposed to "0". Positive float value from 0 to 1.   
-  
-e.g.
+In subsequent lines, one can choose to put genotyping error and allele frequency information by starting the lines with
+the appropriate tags, as listed below:
+
+- `gerror` :  genotyping error rate at the locus. A positive value from 0 to 1. It describes rates of genotyping error from a very 
+simplistic model, the  "alpha" model: with probability of (1-a/n) the true genotype is the observed genotype and
+with probability a/n the genotype is drawn randomly from the population
+genotype frequencies. If genotype posterior values are given, the `gerror` information is ignored.   
+- `afreq`: allele frequency of the "1" allele (as opposed to the "0") allele. Must be a positive float value from 0 to 1.   
+
+e.g., the file could look like this:
+```
 name SNP_1 SNP_2 SNP_3 SNP_4  
 gerror 0.2 0.2 0.2 0.2  
 afreq 0.01 0.04 0.1 0.23  
-  
+```
+
 ### About this wrapper parameters:
 
     -i/--inputPath: directory path that contains the input "geno.txt" and optional "marker_info.txt". String. Required.

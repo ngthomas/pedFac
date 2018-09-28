@@ -1,0 +1,23 @@
+Package: pedfac
+Type: Package
+Title: Factor graph based pedigree sampler
+Version: 0.1.0
+Author: person("Thomas", "Ng", email = "tngthomasng@gmail.com", role = c("aut", "cre"))
+Maintainer: Thomas Ng <tngthomasng@gmail.com>
+Description: 
+    Sample pedigree space by joint likelihood method
+Depends:
+    R (>= 3.1.2)
+License: MIT
+Encoding: UTF-8
+LazyData: true
+Imports:
+    dplyr (>= 0.4.3),
+    ggplot2 (>= 2.1.0),
+    tidyr (>= 0.8.1),
+URL: https://github.com/ngthomas/pedfac
+BugReports: https://github.com/ngthomas/pedfac/issues
+RoxygenNote: 6.0.1
+Suggests: knitr,
+    rmarkdown
+VignetteBuilder: knitr

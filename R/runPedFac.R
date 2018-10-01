@@ -129,5 +129,47 @@ runPedFac <- function(geno.path,
                   ma.id = ifelse(ma > length(id.ls), paste0("unobs.", ma, collapse = ""),
                                  as.character(id.ls[ma])))
 
+  message("writing ped_sample.txt")
+  write.table(ped.id.tbl %>% dplyr::ungroup() %>% dplyr::select(-kid, -pa, -ma),
+              paste0(param$output.path,"/ped_sample.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
 
+  message("writing parent_assignment.txt")
+  write.table(retrieveParent(ped.tbl, max.id, id.ls),
+              paste0(param$output.path,"/parent_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+  message("writing fullsib_assignment.txt halfsib_assignment.txt ")
+  write.table(retrieveFullSib(ped.tbl, max.id, id.ls),
+              paste0(param$output.path,"/fullsib_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  write.table(retrieveHalfSib(ped.tbl, max.id, id.ls),
+              paste0(param$output.path,"/halfsib_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+  message("writing grandparent_assignment.txt")
+  grandparent.tbl <- retrieveGrandparents(ped.tbl, max.id, id.ls)
+  write.table(grandparent.tbl,
+              paste0(param$output.path,"/grandparent_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+  #report grandparentage assignment disregarding whether it is belong to maternal side or paternal side
+
+  if(nrow(grandparent.tbl)>0) {
+  grandparent.v2 <- grandparent.tbl %>%
+    dplyr::group_by(kid, grandpa.pa, grandma.pa, grandpa.ma, grandma.ma) %>%
+    dplyr::mutate(univ.id = paste0(sort(c(paste0(c(grandpa.pa,grandma.pa),collapse = "-"),
+                                          paste0(c(grandpa.ma,grandma.ma),collapse = "-"))),
+                                   collapse = "-")) %>%
+    dplyr::group_by(kid, univ.id) %>%
+    dplyr::mutate(prob = sum(prob),
+                  rnum = dplyr::row_number()) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(rnum ==1) %>%
+    dplyr::select(-univ.id, -rnum)
+
+  write.table(grandparent.v2,
+              paste0(param$output.path,"/grandparent_assignment_v2.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  }
 }

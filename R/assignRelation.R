@@ -1,3 +1,5 @@
+subbingID <- function(numeric.id, max.id, sub.ls) ifelse(numeric.id>max.id, -1, sub.ls[numeric.id])
+
 retrieveGrandparents <- function(df, max.id, id.ls) {
   ped.grandpa <- df %>% dplyr::rename(pa=kid,
                                grandpa.pa = pa,
@@ -8,6 +10,8 @@ retrieveGrandparents <- function(df, max.id, id.ls) {
 
   n.iter <- max(df$iter)+1
   ped.join.pa<- dplyr::inner_join(df, ped.grandpa, by=c("iter","pa"))
+  if(nrow(ped.join.pa)==0) return()
+
   dplyr::inner_join(ped.join.pa, ped.grandma, by=c("iter","ma")) %>%
     dplyr::select(-pa, -ma) %>%
     dplyr::filter(kid<=max.id) %>%
@@ -18,12 +22,29 @@ retrieveGrandparents <- function(df, max.id, id.ls) {
                   grandma.ma = subbingID(grandma.ma, max.id, id.ls)) %>%
     dplyr::group_by(kid, grandpa.pa, grandma.pa, grandpa.ma, grandma.ma) %>%
     dplyr::summarise(prob = n()/n.iter) %>%
-    dplyr::arrange(desc(prob))
+    dplyr::arrange(desc(prob))  %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(kid = subbingID(kid, max.id, id.ls))
 }
 
-subbingID <- function(numeric.id, max.id, sub.ls) ifelse(numeric.id>max.id, -1, sub.ls[numeric.id])
+retrieveParent <- function(df, max.id, id.ls) {
 
-retrieveFullSib <- function(df, max.id) {
+  n.iter <- max(df$iter)+1
+
+  df %>%
+    dplyr::filter(kid<=max.id) %>%
+    dplyr::group_by(iter, kid) %>%
+    dplyr::mutate(pa = subbingID(pa, max.id, id.ls),
+                  ma = subbingID(ma, max.id, id.ls)) %>%
+    dplyr::group_by(kid, pa, ma) %>%
+    dplyr::summarise(prob = n()/n.iter) %>%
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(prob)) %>%
+    dplyr::mutate(kid = subbingID(kid, max.id, id.ls))
+}
+
+
+retrieveFullSib <- function(df, max.id, id.ls) {
   sib.pairs <- df %>%
     dplyr::filter(kid<=max.id) %>%
     dplyr::group_by(iter, pa, ma) %>%
@@ -36,6 +57,8 @@ retrieveFullSib <- function(df, max.id) {
 
   n.iter <- max(df$iter)+1
 
+  if(is.null(nrow(sib.pairs))) return()
+
   lapply(sib.pairs,
          function(x) combn(as.numeric(unlist(strsplit(x,",",perl=T))),
                            m=2,
@@ -43,13 +66,17 @@ retrieveFullSib <- function(df, max.id) {
     dplyr::bind_cols() %>%
     t %>%
     dplyr::tbl_df() %>%
-    mutate(kid.1 = ifelse(V1<V2, V1,V2),
+    dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
            kid.2 = ifelse(V1<V2, V2,V1)) %>%
-    dplyr::group_by(kid.1, kid.2)%>%
-    dplyr::summarise(prob=n()/n.iter)
+    dplyr::group_by(kid.1, kid.2) %>%
+    dplyr::summarise(prob=n()/n.iter) %>%
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(prob)) %>%
+    dplyr::mutate(kid.1 = subbingID(kid.1, max.id, id.ls),
+                  kid.2 = subbingID(kid.2, max.id, id.ls))
 }
 
-retrieveHalfSib <- function(df, max.id) {
+retrieveHalfSib <- function(df, max.id, id.ls) {
   sib.pa.pairs <- df %>%
     dplyr::filter(kid<=max.id) %>%
     dplyr::group_by(iter, pa) %>%
@@ -70,6 +97,8 @@ retrieveHalfSib <- function(df, max.id) {
     dplyr::select(sib) %>%
     unlist()
 
+  if(is.null(nrow(sib.ma.pairs)) && is.null(ncol(sib.pa.pairs))) return()
+
   n.iter <- max(df$iter)+1
 
   all.sibs <- lapply(c(sib.pa.pairs, sib.ma.pairs),
@@ -87,5 +116,9 @@ retrieveHalfSib <- function(df, max.id) {
   dplyr::full_join(all.sibs, retrieveFullSib(df, max.id), by=c("kid.1", "kid.2")) %>%
     dplyr::group_by(kid.1, kid.2) %>%
     dplyr::summarise(prob = ifelse(is.na(prob.y),prob.x,prob.x-(2*prob.y))) %>%
-    dplyr::filter(prob>0)
+    dplyr::filter(prob>0) %>%
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(prob)) %>%
+    dplyr::mutate(kid.1 = subbingID(kid.1, max.id, id.ls),
+                  kid.2 = subbingID(kid.2, max.id, id.ls))
 }

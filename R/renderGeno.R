@@ -160,7 +160,7 @@ writeIntermedGeno <- function(param) {
 
   zero.freq <- zero.allele.tbl %>%
     dplyr::group_by(snp.pos) %>%
-    summarise(freq=sum(freq))
+    dplyr::summarise(freq=sum(freq))
 
   zero.rep.key <- zero.allele.tbl %>% dplyr::select(snp.pos, snp) %>% dplyr::mutate(allele=0)
 
@@ -190,7 +190,7 @@ writeIntermedGeno <- function(param) {
       dplyr::mutate(geno = allele.x + allele.y,
                     geno.cl = ifelse(geno==-2,"3",as.character(geno))) %>%
       dplyr::select(id, snp.pos, geno.cl)) %>%
-    spread(snp.pos, geno.cl)
+    tidyr::spread(snp.pos, geno.cl)
 
   # save RDS for id.factor = id and geno.allele class rep
   # format and write intermed geno file

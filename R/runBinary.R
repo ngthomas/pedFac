@@ -16,13 +16,6 @@ pedigraph_exists <- function() {
   file.exists(pedigraph_binary_path())
 }
 
-#' return TRUE if pedigraph is executable
-#'
-ms2geno_is_executable <- function() {
-  NULL #incomplete
-}
-
-
 #' file path to be used in a call to pedigraph
 #'
 #' This version checks to make sure it is there and throws an

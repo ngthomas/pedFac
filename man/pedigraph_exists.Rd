@@ -9,3 +9,4 @@ pedigraph_exists()
 \description{
 return TRUE if pedigraph exists in described path
 }
+\keyword{internal}

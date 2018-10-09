@@ -9,3 +9,4 @@ pedigraph_binary_path()
 \description{
 return the path where pedigraph should be in the R system paths
 }
+\keyword{internal}

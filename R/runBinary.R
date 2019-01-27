@@ -1,6 +1,7 @@
 
 #' return the path where pedigraph should be in the R system paths
 #'
+#' @keywords internal
 pedigraph_binary_path <- function() {
   #bin_name <- paste("pedigraph", Sys.info()["sysname"], sep = "-")
   bin_name <- "pedigraph"
@@ -12,6 +13,7 @@ pedigraph_binary_path <- function() {
 
 #' return TRUE if pedigraph exists in described path
 #'
+#' @keywords internal
 pedigraph_exists <- function() {
   file.exists(pedigraph_binary_path())
 }

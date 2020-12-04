@@ -51,7 +51,10 @@ checkGeno <- function(geno.path) {
       dplyr::mutate(snp.pos = floor((as.numeric(col)-5)/2)),
     by=c("id", "snp.pos" )) %>%
     dplyr::group_by(id, snp.pos) %>%
-    dplyr::mutate(comma.entries.1 = length(unlist(strsplit(snp.x, ",",fixed = T))) ==2,
+    dplyr::mutate(
+      snp.x = as.character(snp.x),
+      snp.y = as.character(snp.y),
+      comma.entries.1 = length(unlist(strsplit(snp.x, ",",fixed = T))) ==2,
                   comma.entries.2 = length(unlist(strsplit(snp.y, ",",fixed = T))) ==2,
                   not.match.up = ((snp.x %in% c("N",-1))+(snp.y %in% c("N",-1))) ==1) %>%
     dplyr::ungroup() %>%

@@ -16,10 +16,10 @@ retrieveGrandparents <- function(df, max.id, id.ls) {
     dplyr::select(-pa, -ma) %>%
     dplyr::filter(kid<=max.id) %>%
     dplyr::group_by(iter, kid) %>%
-    dplyr::mutate(grandpa.pa = subbingID(grandpa.pa, max.id, id.ls),
-                  grandma.pa = subbingID(grandma.pa, max.id, id.ls),
-                  grandpa.ma = subbingID(grandpa.ma, max.id, id.ls),
-                  grandma.ma = subbingID(grandma.ma, max.id, id.ls)) %>%
+    dplyr::mutate(grandpa.pa = as.character(subbingID(grandpa.pa, max.id, id.ls)),
+                  grandma.pa = as.character(subbingID(grandma.pa, max.id, id.ls)),
+                  grandpa.ma = as.character(subbingID(grandpa.ma, max.id, id.ls)),
+                  grandma.ma = as.character(subbingID(grandma.ma, max.id, id.ls))) %>%
     dplyr::group_by(kid, grandpa.pa, grandma.pa, grandpa.ma, grandma.ma) %>%
     dplyr::summarise(prob = n()/n.iter) %>%
     dplyr::arrange(desc(prob))  %>%
@@ -34,13 +34,15 @@ retrieveParent <- function(df, max.id, id.ls) {
   df %>%
     dplyr::filter(kid<=max.id) %>%
     dplyr::group_by(iter, kid) %>%
-    dplyr::mutate(pa = subbingID(pa, max.id, id.ls),
-                  ma = subbingID(ma, max.id, id.ls)) %>%
-    dplyr::group_by(kid, pa, ma) %>%
+    dplyr::mutate(pa.id = as.character(subbingID(pa, max.id, id.ls)),
+                  ma.id = as.character(subbingID(ma, max.id, id.ls))) %>%
+    dplyr::group_by(kid, pa.id, ma.id) %>%
     dplyr::summarise(prob = n()/n.iter) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(desc(prob)) %>%
-    dplyr::mutate(kid = subbingID(kid, max.id, id.ls))
+     dplyr::mutate(kid.id = subbingID(kid, max.id, id.ls)) %>%
+    ungroup() %>%
+    dplyr::select(kid.id, pa.id, ma.id, prob)
 }
 
 
@@ -72,8 +74,8 @@ retrieveFullSib <- function(df, max.id, id.ls) {
     dplyr::summarise(prob=n()/n.iter) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(desc(prob)) %>%
-    dplyr::mutate(kid.1 = subbingID(kid.1, max.id, id.ls),
-                  kid.2 = subbingID(kid.2, max.id, id.ls))
+    dplyr::mutate(kid.1 = as.character(subbingID(kid.1, max.id, id.ls)),
+                  kid.2 = as.character(subbingID(kid.2, max.id, id.ls)))
 }
 
 retrieveHalfSib <- function(df, max.id, id.ls) {
@@ -119,6 +121,6 @@ retrieveHalfSib <- function(df, max.id, id.ls) {
     dplyr::filter(prob>0) %>%
     dplyr::ungroup() %>%
     dplyr::arrange(desc(prob)) %>%
-    dplyr::mutate(kid.1 = subbingID(kid.1, max.id, id.ls),
-                  kid.2 = subbingID(kid.2, max.id, id.ls))
+    dplyr::mutate(kid.1 = as.character(subbingID(kid.1, max.id, id.ls)),
+                  kid.2 = as.character(subbingID(kid.2, max.id, id.ls)))
 }

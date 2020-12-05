@@ -33,7 +33,8 @@ devtools::install_github("ngthomas/pedfac")
 
 ## About run-pedfac
 
-This Python script expects the user to provide the path to a valid space-separated genotype file named "genotype.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns a summary of the MCMC output and also details of the sampled pedigrees.  
+runPedFac takes in user's input space-separated genotype file - "geno.txt" so that it can generate all necessary secondary files for the C-script pedigree sampler to run. Once the sampling iterations are completed, it returns a summary of the MCMC output and also all sampled pedigrees.  
+
 
 ### The genotype file:
 
@@ -43,9 +44,9 @@ Each line in the file holds information about a single individual ordered as fol
 
 - unique individual id | is the indiv observed? | sex of individual | birth year | genotype(s) information
   
-For example, for an observed male individual who
+For example, for an observed male individual- "Tom" who
 
-- is born in the middle of 1986  
+- is born in the summer of 1986  
 - with heterozygous allele of "1" and "0" for the first locus and  
 - homogygous allele of "3" for the second locus,  
 
@@ -67,7 +68,7 @@ two columns (one for each gene copy). The allele information must be giving in o
     - *As an integer*. If genotype information is not known, use -1. e.g -1 -1. If data are from biallelic SNPs, we recommend using 0
     for one allele and 1 for the other.  
     - *string for both alleles for any number of loci*. For string based genotype i.e. haplotype, this program recognizes standard A, T, C, and G bases, e.g ACAAT ATCAA. If the genotype info is not known, use N e.g. `N N`. (NOT CLEAR THOMAS, IS THIS REALLY FOR HAPLOTYPES? DO WE USE JUST ONE COLUMN FOR ALL MARKERS? NEED TO TALK THIS OVER).  
-    - *comma-separated genotype classes and associated posterior probabilties*. (TECHNICALLY THESE ARE LIKELIHOODS, NOT POSTERIOR PROBS, NO?) For now, we only accept the case of biallelic genotypes with 3 possible genotypic classes - 0, 1, 2.  `0` represents a homozygote for the major allele, `2` represents a homozygote for the minor allele, and `1` represents a heterozygote.  There are still
+    - *comma-separated genotype classes and associated likelihood probabilties*. For now, we only accept the case of biallelic genotypes with 3 possible genotypic classes - 0, 1, 2.  `0` represents a homozygote for the major allele, `2` represents a homozygote for the minor allele, and `1` represents a heterozygote.  There are still
     two space-separated columns for each locus. The first is a string of comma-separated genotype classes (i.e. `0,1,2`) and
     the second is a comma-separated string with their respective genotype likelihoods.  For example `0,1,2 0.9,0.3,0.2`   
     - (This feature is not available yet --) For dealing with multiallelic classes (not avail yet), you will be only need to provide the 
@@ -87,8 +88,8 @@ the appropriate tags, as listed below:
 - `gerror` :  genotyping error rate at the locus. A positive value from 0 to 1. It describes rates of genotyping error from a very 
 simplistic model, the  "alpha" model: with probability of (1-a/n) the true genotype is the observed genotype and
 with probability a/n the genotype is drawn randomly from the population
-genotype frequencies. If genotype posterior values are given, the `gerror` information is ignored.   
-- `afreq`: allele frequency of the "1" allele (as opposed to the "0") allele. Must be a positive float value from 0 to 1.   
+genotype frequencies. If genotype posterior values are given, the `gerror` information is ignored. If the genotype is not specified, we default the genotype error baseline as 0.02. 
+- `afreq`: allele frequency of the "1" allele (as opposed to the "0") allele. Must be a positive float value from 0 to 1. If it's not specified, the population frequency is based on all observed genotype.
 
 e.g., the file could look like this:
 ```

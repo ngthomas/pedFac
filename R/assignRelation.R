@@ -122,3 +122,4 @@ retrieveHalfSib <- function(df, max.id, id.ls) {
     dplyr::mutate(kid.1 = subbingID(kid.1, max.id, id.ls),
                   kid.2 = subbingID(kid.2, max.id, id.ls))
 }
+

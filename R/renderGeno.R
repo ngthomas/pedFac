@@ -122,7 +122,9 @@ writeIntermedGeno <- function(param) {
     dplyr::group_by(snp.pos,snp) %>%
     dplyr::summarise(ct = n())
 
+
   # in working with genotype ll
+  if(sum(grepl(",", geno.right$snp, fixed=T)) > 0) {
   geno.ct.2 <- geno.right %>%
     dplyr::filter(!snp %in% c(-1, "N"), grepl(",", snp , fixed=T)) %>%
     dplyr::group_by(snp.pos, id) %>%
@@ -132,7 +134,11 @@ writeIntermedGeno <- function(param) {
     dplyr::group_by(snp.pos,snp) %>%
     dplyr::summarise(ct = sum(ct))
 
-  geno.freq.tbl <- dplyr::bind_rows(geno.ct.1, geno.ct.2) %>%
+    geno.ct.1 <- dplyr::bind_rows(geno.ct.1, geno.ct.2)
+
+  }
+
+  geno.freq.tbl <- geno.ct.1 %>%
     dplyr::group_by(snp.pos,snp) %>%
     dplyr::summarise(ct = sum(ct)) %>%
     dplyr::group_by(snp.pos) %>%
@@ -216,7 +222,7 @@ writeIntermedGeno <- function(param) {
                  "nObsIndiv ", geno.ls$n.obs.indiv, "\n",
                  "nGen ", geno.ls$n.gen, "\n",
                  "nSNP ", geno.ls$n.SNP, "\n",
-                 "nMar 0\n",
+                 "nMar ", param$n.marr,"\n",
                  "maxID ", geno.ls$n.indiv + 1, "\n",
                  "aFreq ", paste0(round(1-(zero.freq %>%
                                              dplyr::arrange(snp.pos) %>%
@@ -224,8 +230,141 @@ writeIntermedGeno <- function(param) {
                                   collapse = " "), "\n",
                  "epsilon ", paste0(rep(param$geno.err, geno.ls$n.SNP), collapse=" "), "\n",
                  "obsFrac ", paste0(round(geno.ls$observe.frac,3), collapse=" "), "\n",
-                 "maxMarrGap ", ceiling(param$max.age/param$min.age), "\n",
+                 #"maxMarrGap ", ceiling(param$max.age/param$min.age), "\n",
                  "maxUnobsLayer ", param$max.unobs ),collapse = ""),
         paste0(param$output.path,"/prior.txt")
         )
 }
+
+#' simulate genotype entry based on mating table (kid, pa, ma)
+#'
+#' The function \code{simGeno} simulates genotype of individuals given a marriage table, with the working assumption that the parents of the offspring are from the same generation
+#'@param mating.path string. Path to a 3-column mating file. Required.
+#'@param n.snp positive integer. number of SNPs. 10 default. Optional
+#'@param alpha.ad positive numeric. parameter of a beta distribution - model for allelic density map. 10 default. Optional
+#'@param beta.ad positive numeric. parameter of a beta distribution - model for allelic density map. 20 default. Optional
+#'@param geno.err positive value between 0 and 1. the rate of observing error in genotype. 0.02 default. Optional
+#'@param random.seed positive numeric. random seed set for genotype sampling model. 46 default. Optional
+#'@param out.path string. Path to hold the geno info
+#'
+#' library(tidyverse)
+#' mating.path <-"/Users/thomasn/repo/pedigree-factor-graphs/data/loop_test1/marriage.txt"
+#' simGeno(mating.path)
+#'
+simGeno <- function(mating.path,
+                    n.snp = 10,
+                    alpha.ad = 10, beta.ad = 10,
+                    geno.err = 0.02,
+                    random.seed = 46,
+                    out.path = tempdir()) {
+  set.seed(random.seed)
+
+  if(!file.exists(mating.path)) stop("the mating file 'mating.path' provided - ", geno.path, " does not exist")
+
+  # reading matable tbl
+  mating.tbl <- read.table(mating.path, stringsAsFactors = FALSE) %>%
+    dplyr::tbl_df()
+  mating.factor <- factor(unlist(mating.tbl))
+
+  # set up param (number id)
+  n.id <- factor(unlist(mating.tbl)) %>% levels %>% length()
+  cc.indx <- 1:n.id # associate connecting components
+  gen.indx <- rep(0, n.id) # assign generation level
+
+  # sampling background alllelic frequency
+  af <- rbeta(n.snp, alpha.ad, beta.ad)
+  maf <- pmin(1-af,af)
+
+  # create first copy and ..
+  geno.1 <- rbinom(n.id*n.snp, 1,maf) %>% matrix(ncol=n.snp, by=T)
+  # second copy
+  geno.2 <- rbinom(n.id*n.snp, 1,maf) %>% matrix(ncol=n.snp, by=T)
+  # indiv sex (default, update during part 2)
+  indiv.sex <- rbinom(n.id, 1, 0.5)+1
+
+  # 1st step: estimate generation of each indiv (assume everyone is gen 0, until
+  # proven otherwise)
+  factor.tbl <- matrix(as.numeric(mating.factor), ncol=3)
+  for(i in 1:nrow(factor.tbl)) {
+    x<-factor.tbl[i,]
+    if(cc.indx[x[2]] != cc.indx[x[3]]) {
+      diff.rank <- gen.indx[x[2]] - gen.indx[x[3]]
+      if(diff.rank != 0) {
+        if(diff.rank > 0) {
+          gen.indx = gen.indx + diff.rank*(cc.indx==cc.indx[x[3]])
+        } else {
+          gen.indx = gen.indx + -1*diff.rank*(cc.indx==cc.indx[x[2]])
+        }
+      }
+      cc.indx[(cc.indx == cc.indx[x[3]])] <- cc.indx[x[2]]
+    }
+
+    if(cc.indx[x[2]] != cc.indx[x[1]]){
+      diff.rank <- gen.indx[x[2]] - (gen.indx[x[1]]+1)
+      if(diff.rank != 0) {
+        if(diff.rank > 0) {
+          gen.indx = gen.indx + diff.rank*(cc.indx==cc.indx[x[1]])
+        } else {
+          gen.indx = gen.indx + -1*diff.rank*(cc.indx==cc.indx[x[2]])
+        }
+      }
+      cc.indx[(cc.indx == cc.indx[x[1]])] <- cc.indx[x[2]]
+    }
+
+  }
+
+  # 2nd step : rank the marr table from least recent to fill in offspring genotype
+  sorted.order <- gen.indx[factor.tbl[,1]] %>% sort(decreasing = T, index.return=T) %>% .$ix
+  for(i in 1:nrow(factor.tbl)) {
+    x<-factor.tbl[sorted.order[i],]
+    indiv.sex[x[2]] <- 1
+    indiv.sex[x[3]] <- 2
+    parent.copy <- rbinom(2,1,0.5)
+
+    #transfer geno copy from parent 1
+    if(parent.copy[1] == 1) {
+      geno.1[x[1],] <- geno.1[x[2],]
+    } else {
+      geno.1[x[1],] <- geno.2[x[2],]
+    }
+
+    #transfer geno copy from parent 2
+    if(parent.copy[2] == 1) {
+      geno.2[x[1],] <- geno.1[x[3],]
+    } else {
+      geno.2[x[1],] <- geno.2[x[3],]
+    }
+
+  }
+  # impose genotype error at the end
+  make.err.1 <- rbinom(n.id*n.snp, 1, geno.err) %>% matrix(ncol=n.snp, by=T)
+  make.err.2 <- rbinom(n.id*n.snp, 1, geno.err) %>% matrix(ncol=n.snp, by=T)
+
+  final.geno.1 <- abs(geno.1-make.err.1)
+  final.geno.2 <- abs(geno.2-make.err.2)
+
+  geno.long <- cbind(final.geno.1, final.geno.2)[,rbind(1:n.snp, (1:n.snp)+n.snp) %>% as.vector()]
+
+  geno.input.tbl <- cbind(as.numeric(levels(mating.factor)),
+                          rep(1, n.id),
+                          indiv.sex,
+                          max(gen.indx) - gen.indx,
+                          geno.long)
+
+  geno.path <- paste0(out.path, "/ingeno.txt")
+  write.table(geno.input.tbl,
+              geno.path,sep = " ", eol = "\n", quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+  param<-list(geno.path=geno.path,
+              output.path=out.path,
+              random.seed=random.seed,
+              observe.frac= 1,
+              max.unobs=1, max.gen=max(gen.indx)+1,
+              min.age=1, max.age=1, geno.err=geno.err,
+              n.marr = paste0(mating.tbl$V2, "_",mating.tbl$V3) %>% unique %>% length)
+
+  message("writing final files to ", out.path)
+
+  writeIntermedGeno(param)
+}
+

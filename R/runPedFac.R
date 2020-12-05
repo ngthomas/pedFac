@@ -47,6 +47,7 @@ runPedFac <- function(geno.path,
               observe.frac=observe.frac,
               max.unobs=max.unobs, max.gen=max.gen,
               min.age=min.age, max.age=max.age,
+              n.marr = 0,
               haplo.method=haplo.method, geno.err=geno.err)
 
 
@@ -75,6 +76,7 @@ runPedFac <- function(geno.path,
 
   if (min.age <=0) stop("min.age must be greater than 0")
   if (max.age <=0) stop("max.age must be greater than 0")
+  if (max.age < min.age) stop("min.age is much greater than max.age")
 
   if (!(haplo.method %in% c(0,1,2))) stop("Out of acceptable range for haplo.method")
   if (geno.err > 1 | geno.err < 0) stop("Out of acceptable range for geno.err")

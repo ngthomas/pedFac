@@ -168,3 +168,8 @@ afreq 0.01 0.04 0.1 0.23
         1 - (not avail) deconstructing haplotype into a set of nucleotide units
         2 - (not avail) reduce the multiallelic basis into n class of binomial switches
     -g/--genoerr: Assumed background genotype error rate in the form of epsilon. Float value from 0 to 1; 0.02 as default. If the genotype error row - 'gerror' of marker_info.txt is provided, this param will be overridden.
+
+
+## version of pedigraph
+the latest exec file is of version b369e18d555901f716437d626f5ff75cf5a9a719
+

@@ -4,10 +4,21 @@
 \alias{runPedFac}
 \title{Initialize pedigree run}
 \usage{
-runPedFac(geno.path, marker.path = "", output.path = "",
-  random.seed = 26, n.iter = 1, cyclic.choice = 0,
-  observe.frac = 0.8, max.unobs = 1, max.gen = 0, min.age = 1,
-  max.age = 1, haplo.method = 0, geno.err = 0.02)
+runPedFac(
+  geno.path,
+  marker.path = "",
+  output.path = "",
+  random.seed = 26,
+  n.iter = 1,
+  cyclic.choice = 0,
+  observe.frac = 0.8,
+  max.unobs = 1,
+  max.gen = 0,
+  min.age = 1,
+  max.age = 1,
+  haplo.method = 0,
+  geno.err = 0.02
+)
 }
 \arguments{
 \item{geno.path}{string. Path to the input genotype file (see checkGeno help for formatting). Required.}

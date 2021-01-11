@@ -142,7 +142,7 @@ runPedFac <- function(geno.path,
               sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
 
   message("writing fullsib_assignment.txt halfsib_assignment.txt ")
-  write.table(retrieveFullSib(ped.tbl, max.id, id.ls),
+  write.table(RetrieveFullSib(ped.tbl, max.id, id.ls),
               paste0(param$output.path,"/fullsib_assignment.txt"),
               sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
   write.table(retrieveHalfSib(ped.tbl, max.id, id.ls),

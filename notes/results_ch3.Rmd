@@ -1,0 +1,209 @@
+---
+title: "Test runs for cyclic pedigrees"
+author: "Thomas C Ng"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(pedfac)
+opts_chunk$set(#results = 'asis',      # This is essential (can also be set at the chunk-level)
+                #comment = NA, 
+                #prompt = FALSE, 
+                cache = FALSE)
+```
+
+
+This will goes into the result and discussion on the chapter for pedigree cyclic sampler
+
+## Mini-study of small cyclic pedigrees 
+
+In Figures \ref{fig:complexloop1} and \ref{fig:complexloop2}, we have a multigenerational pedigree with inbreeding and marriage chain loops and the other with complex loops. With the network configuration, we will simulate various genotype dataset under varying parameters at a time (or possible multiple at once). We will start working with an ideal scenario of having an abundant amount of markers with neglible genotype error and having all individuals present. 
+
+Then, we can concern how pedFac behaves under the situations w/ low number of markers, w/poor sampling events, or/and poor genotype accuracy. 
+
+We should also definitely compared the result w/acyclic ped sampler, COLONY and Franz. 
+
+```{r}
+  marr.tbl <- c(4,1,2,
+                12,3,4,
+                10,3,5,
+                7,6,5,
+                9,6,4,
+                15,7,8,
+                16,7,8,
+                17,15,16,
+                13,11,12,
+                14,11,12,
+                18,13,14)
+
+  marr.tbl <- marr.tbl %>%
+    as.character %>%
+    matrix(.,ncol=3, byrow = T) 
+  colnames(marr.tbl) <- c("Kid", "Pa", "Ma")
+  marr.tbl <- as_tibble(marr.tbl)
+
+  simGeno(mating.tbl = marr.tbl, out.path = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch3test/loop1/",
+          n.snp =200, geno.err = 0.001, random.seed = 48) 
+```
+
+
+```{r}
+  marr.tbl <- c(3,1,2,
+                4,1,2,
+                5,3,4)
+
+  marr.tbl <- marr.tbl %>%
+    as.character %>%
+    matrix(.,ncol=3, byrow = T) 
+  colnames(marr.tbl) <- c("Kid", "Pa", "Ma")
+  marr.tbl <- as_tibble(marr.tbl)
+
+  simGeno(mating.tbl = marr.tbl, out.path = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch3test/loop2/",
+          n.snp =50, geno.err = 0.001, random.seed = 150) 
+```
+
+
+
+```{r}
+  marr.tbl <- c(16,12,15,
+                5,1,2,
+                   8,6,5,
+                   4,1,2,
+                   11,4,3,
+                   15,8,7,
+                   14,8,9,
+                   13,10,9,
+                   12,10,11)#,
+                   #16,12,15)
+
+  marr.tbl <- marr.tbl %>%
+    as.character %>%
+    matrix(.,ncol=3, byrow = T) 
+  colnames(marr.tbl) <- c("Kid", "Pa", "Ma")
+  marr.tbl <- as_tibble(marr.tbl)
+
+#  simGeno(mating.tbl = marr.tbl, out.path = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch3test/loop3/",
+ #         n.snp =100, geno.err = 0.001, random.seed = 328) 
+  
+    simGeno(mating.tbl = marr.tbl, out.path = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch3test/loop3/",
+          n.snp =600, geno.err = 0.001, random.seed = 3970) 
+```
+
+what i learn from running all of this sample datasets is that even though with the large number of SNPs, false assignment is always present in selecting half-sib or obviously full sib of the true parent as the inferred candidate. The possible way to reduce the occurence for false call is to have a more discriminatory set of markers.
+
+Additonally, the current setup for fixing one candidate at a time and propose changes can cause a sticky chain. 
+    simGeno(mating.tbl = marr.tbl, out.path = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch3test/loop3/",
+          n.snp =600, geno.err = 0.001, random.seed = 3970) 
+In one of the trio, both of the true parent pair on its own are actually a weaker single parent candiate compared to their fullsib set even though the joint prob of assigning both of them as parent pair is the best prob out there. This demand me to create a much boarder open system where I keep similar sample flow as acyclic such that I will be proposing all singlet chocies and from that choose out some top n canddiate and proposed them as x_fixed. 
+
+
+I. -1, -1 (keep)
+II -1, singlet (keep all)
+III Sort and report top n candidate of II
+IV set those top candidate as x_fixed (make sure that if x_i as also top n candidate, we restrict only one-time appearance s.t. indx(x_fixed) > indx(x_i) iff x_i \in top_n )
+There's additional updates I have to make
+V do all acceptable m-node
+
+given a pedigree network with updated rcb record, - at the start for each sampling sweep, go
+- for any rcb doesn't have any loop breaker, we choose a variable node with the least entropic information and sample a genotype value to be conditioned at
+afterward, work through all loop-breakers and ask to resample genotype value (and also consider the possibility of dropping out )
+
+Subsequent action should go toward simulating larger complex pedigrees with unbridled loop complexity. The complexity can be enhanced by increasing promiscuity rate or including more generations. 
+
+That's simulate a three generation pedigree (without cyclic restriction) 
+200 SNPs, with 200 founders
+```{bash}
+python src/simPed.py -s 200 -ni 200 -ns 100 -sf 1 --gen 3 -o data/3gen/cyclic/ni_200_ns100_sf1.0_s200
+```
+
+```{r}
+##test out
+ExtractGrandParents(run.path="/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200_ns100_sf1.0_s200", max.iter= 20)
+
+ExtractGrandParents(run.path="/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed231/",  max.iter= 10) %>% View()
+
+```
+We will simulate 10 various pedigrees starting out w/200 founders, 100 snps
+```bash
+for seed in {230..239}; do
+for sampleFrac in {0.8,1}; do
+for nSNP in 100; do
+for gen in 3;do
+python src/simPed.py -s ${seed} -ni 200 -ns ${nSNP} -sf ${sampleFrac} --gen ${gen} -o data/3gen/cyclic/ni_200/ns_${nSNP}/sf${sampleFrac}/seed${seed};
+done; done; done; done
+
+for seed in {230..239}; do
+for sampleFrac in {0.8,1}; do
+for nSNP in 100; do
+for gen in 3;do
+outpath=`echo "data/3gen/cyclic/ni_200/ns_"${nSNP}"/sf"${sampleFrac}"/seed"${seed}"/no_parent"`
+inpath=`echo "data/3gen/cyclic/ni_200/ns_"${nSNP}"/sf"${sampleFrac}"/seed"${seed}""`
+mkdir -p ${outpath};
+awk '$4==2002 || $4==2000' ${inpath}/geno.txt > ${outpath}/geno.txt;
+nObs=`wc -l ${outpath}/geno.txt |awk '{print $1}'`;
+awk '{if(NR<3){$2='$nObs'}; if (NR==10){$3="0"}; print $0}' ${inpath}/prior.txt > ${outpath}/prior.txt;
+echo $outpath;
+done; done; done; done
+
+for seed in {230..239}; do
+for sampleFrac in {0.8,1}; do
+for nSNP in 100; do
+for gen in 3;do
+inpath=`echo "data/3gen/cyclic/ni_200/ns_"${nSNP}"/sf"${sampleFrac}"/seed"${seed}""`
+nohup time src/pedigraph_0.12 -d $inpath -n 100 > ${inpath}/output_a0_c0.tem;
+mv ${inpath}/out ${inpath}/out_a0_c0; 
+done; done; done; done
+
+
+
+for seed in {230..234}; do
+for sampleFrac in 0.8; do
+for nSNP in 100; do
+for gen in 3;do
+inpath=`echo "data/3gen/cyclic/ni_200/ns_"${nSNP}"/sf"${sampleFrac}"/seed"${seed}""`
+nohup time src/pedigraph_0.12 -d $inpath -n 100 -c 1 -a 0 > ${inpath}/output_c1_a0.tem;
+mv ${inpath}/out ${inpath}/out_c1_a0; 
+echo $inpath;
+done; done; done; done
+```
+
+
+```{r}
+ExtractGrandParents(run.path="/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed231",  max.iter= 100,
+                    out.folder.name = "out_c1_a0") %>% View()
+
+ExtractGrandParents(run.path="/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed232/no_parent/",  max.iter= 100) %>% View()
+ll.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed232/no_parent/out/ll.txt"
+ll.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed232/debug1/out/ll.txt"
+ll.tbl <- read.table(ll.path) %>% as_tibble() %>% mutate(a=row_number())
+ggplot() + geom_point(data=ll.tbl, aes(x=a, y=V3))
+```
+
+```{bash}
+awk '$4==2000' geno.txt > debug2/geno.txt
+awk '$1>=378 && $1<388 && $4==2002' geno.txt >> debug2/geno.txt
+nObs=`wc -l debug2/geno.txt |awk '{print $1}'`;
+awk '{if(NR<3){$2='$nObs'}; if (NR==10){$3="0"}; print $0}' prior.txt > debug2/prior.txt;
+
+awk '$4==2000' geno.txt > debug3/geno.txt
+awk '$1==386 && $4==2002' geno.txt >> debug3/geno.txt
+nObs=`wc -l debug3/geno.txt |awk '{print $1}'`;
+awk '{if(NR<3){$2='$nObs'}; if (NR==10){$3="0"}; print $0}' prior.txt > debug3/prior.txt;
+cp marriage.all debug3/.
+
+```
+```{r}
+ExtractGrandParents(run.path="/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed232/debug3/",  max.iter= 500) %>% View()
+
+ll.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/3gen/cyclic/ni_200/ns_100/sf0.8/seed232/debug3/out/ll.txt"
+ll.tbl <- read.table(ll.path) %>% as_tibble() %>% mutate(a=row_number())
+ggplot() + geom_point(data=ll.tbl, aes(x=a, y=V3))
+```

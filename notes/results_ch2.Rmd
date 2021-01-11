@@ -1,0 +1,404 @@
+---
+title: "PedFac performance on empricial pedigrees - ch2"
+author: "Thomas C Ng"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+  html_notebook:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(pedfac)
+library(tictoc) #devtools::install_github("jabiru/tictoc")
+library(sequoia)
+
+opts_chunk$set(#results = 'asis',      # This is essential (can also be set at the chunk-level)
+                #comment = NA, 
+                #prompt = FALSE, 
+                cache = FALSE)
+```
+
+
+We will start out simple by revisiting the two generation full-sib pedigree from Anderson and Ng to make sure that we are on the right track. This simulated genotype data PedFac's acyclic sampler is generated from an empirical two generation chinook pedigree with the absence of the parental generation. We will simulate six replicate cases of 95 SNPs with allele frequency of ~\beta{0.5,0.5} with 0.5% rate in missing genotype and 2% rate in genotype error. 
+
+We report full sib assignment ROC ()
+
+```{r}
+#retrieve from https://github.com/eriqande/tpb-colony-compare/tree/master/data
+load("/Users/thomasn/repo/pedigree-factor-graphs/data/andersonng/chinook_full_sibs.Rda")
+
+#double check that it's all full sib fam
+chinook_full_sibs_pedigree %>%
+  group_by(Pa) %>%
+  summarise(num.Ma = length(unique(Ma))) %>%
+  ungroup() %>%
+  filter(num.Ma > 1) %>%
+  nrow()
+
+chinook_full_sibs_pedigree %>%
+  group_by(Pa) %>%
+  summarise(num.kids = length(unique(Kid))) %>%
+  ungroup() %>% select(num.kids) %>% table
+```
+```{r}
+
+simFulldata <- function(seed.num = 234,
+                        pedigraph.version = 0.15,
+                        pedigraph.path = "/Users/thomasn/repo/pedigree-factor-graphs/src",
+                        outdir.path="/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib", n.iter = 10,
+                        replicate.indx  = 1,
+                        ped.df = chinook_full_sibs_pedigree,
+                        n.snp =95, geno.err = 0.02, skip.gen.ls = 0, missing.unk = 0.005,
+                        pedfac.opt = "") {
+  
+  ## factorize ped.df
+  mating.factor <- factor(unlist(ped.df))
+  mating.lvl <- levels(mating.factor)
+  mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
+  
+  outfolder.path <- paste0(outdir.path,"/",replicate.indx)
+  
+  dir.create(file.path(outfolder.path), recursive = TRUE)
+  set.seed(seed.num)
+  random.arr <- ceiling(c(runif(2,0,1e6)))
+  write.table(random.arr, paste0(outfolder.path,"/","rand"),
+              sep = " ",eol = " ",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  
+  colnames(mating.factor.tbl) <- c("kid","pa","ma")
+  simGeno(mating.tbl = mating.factor.tbl, out.path = outfolder.path,
+          n.snp =n.snp, geno.err = geno.err, random.seed = seed.num, skip.gen.ls = skip.gen.ls, 
+          missing.unk = missing.unk) 
+  
+  
+  pedfac.call <- paste0(pedigraph.path,"/pedigraph_",pedigraph.version, " -d ", outfolder.path,
+                         " -n ", n.iter, 
+                         " -r ",outfolder.path,"/rand ", pedfac.opt, collapse = "")
+  
+  tic("run pedFac:")
+  system(pedfac.call,ignore.stderr = F, ignore.stdout = F)
+  runtime <- toc()
+  
+  out.ped.tbl <- read.table(paste0(outfolder.path, "/out/ped.txt",collapse = ""), stringsAsFactors = FALSE) %>%
+    dplyr::tbl_df() %>%
+    dplyr::rename("iter"="V1", "kid"="V2", "pa"="V3", "ma"="V4") %>%
+    dplyr::group_by(iter, kid) %>%
+    dplyr::summarise(pa = pa[dplyr::n()],
+                     ma = ma[dplyr::n()])
+  
+  id.ls <-readRDS(paste0(outfolder.path, "/id.rds",collapse = ""))$id
+  max.id <- length(id.ls)
+  
+  message("writing fullsib_assignment.txt ")
+  full.sib.grp.infer <- RetrieveFullSib(out.ped.tbl, max.id, id.ls)
+  write.table(full.sib.grp.infer,
+              paste0(outfolder.path,"/fullsib_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  
+  ## perform pairwise sib-pair from the truth ped
+  full.sib.pair.truth.tbl <- RetrieveFullSibTruth(mating.factor.tbl)
+  ## run cluster analysis
+  
+  run.summary <- list()
+  run.summary$runtime <- runtime$toc - runtime$tic
+  run.summary$pairwise.tbl <- full_join(full.sib.grp.infer, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
+  run.summary$cluster.ls <- RetrieveFullSibGrp(out.ped.tbl, mating.factor.tbl, max.id, id.ls)
+  return(run.summary)
+}
+```
+
+```{r}
+RunSequoia <- function(seed.num = 234,
+                        outdir.path="/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib", 
+                        replicate.indx  = 1,
+                        ped.df = chinook_full_sibs_pedigree,
+                        n.snp =95, geno.err = 0.02, skip.gen.ls = 0, missing.unk = 0.005,
+                        pedfac.opt = "") {
+  
+  ## require that pedFac has already run Sim
+  ## factorize ped.df
+  mating.factor <- factor(unlist(ped.df))
+  mating.lvl <- levels(mating.factor)
+  mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
+  colnames(mating.factor.tbl) <- c("kid","pa","ma")
+  
+  outfolder.path <- paste0(outdir.path,"/",replicate.indx)
+  pedFac.geno.tbl <- read.table(paste0(outfolder.path,"/","geno.txt"), stringsAsFactors = F) %>%
+    as_tibble()
+  
+  lifeHistory.tbl <- pedFac.geno.tbl %>%
+    group_by(V1) %>%
+    summarise(ID = V1,
+           Sex = as.integer(3-V3),
+           BirthYear = V4) %>%
+    ungroup() %>%
+    select(ID, Sex, BirthYear) %>% data.frame()
+  
+  geno.matrix <- pedFac.geno.tbl %>% ungroup() %>% select(-V1, -V2, -V3, -V4, -V5) %>%
+    as.matrix
+  
+  geno.matrix[geno.matrix == 3] <- -9
+  rownames(geno.matrix) <- lifeHistory.tbl$ID
+  
+
+  set.seed(seed.num)
+  
+  tic("run sequoia:")
+  
+  err.rate <- geno.err
+  error.rate.0 <- 1-(err.rate)-(err.rate/2)^2
+  error.rate.1 <- (err.rate/2)^2
+  error.rate.2 <- err.rate /2
+  error.rate.3 <- 1-err.rate
+
+  ErrM <<- matrix(c(error.rate.0,err.rate,error.rate.1,
+          error.rate.2, 1-err.rate, error.rate.2,
+          error.rate.1,err.rate,error.rate.0), ncol = 3)
+  
+        
+  ParOUT <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0)
+
+
+  SeqOUT <- sequoia(GenoM = geno.matrix,
+                   SeqList = ParOUT,
+                   MaxSibIter = 10, Err = geno.err)
+  
+  runtime <- toc()
+  
+  save(ParOUT,SeqOUT, file = paste0(outfolder.path, "/sequoia_out.rds",collapse = ""))
+  
+  id.ls <-readRDS(paste0(outfolder.path, "/id.rds",collapse = ""))$id
+  max.id <- max(id.ls)
+  
+  sequoia.ped.1 <- inner_join(SeqOUT$Pedigree, data.frame(id=rownames(geno.matrix))) %>% as_tibble() %>%
+    select(id, sire, dam, LLRpair) %>% ## using LLRpair as the metric of ordering
+    ungroup() %>%
+    mutate(sire = ifelse(is.na(sire), row_number(), sire),
+           dam = ifelse(is.na(dam), row_number(), dam),
+           LLRpair = ifelse(is.na(LLRpair), 0, LLRpair))
+  
+   sequoia.ped.2 <- 
+     sequoia.ped.1 %>%
+     mutate(sire = as.numeric(factor(sequoia.ped.1$sire))+max.id,
+           dam = as.numeric(factor(sequoia.ped.1$dam))+2*max.id) %>%
+    rename(pa = "sire", ma = "dam", kid = "id")
+  
+  sib.pairs <- sequoia.ped.2 %>%
+    dplyr::group_by(pa, ma) %>%
+    dplyr::summarise(full.sib = paste0(kid, collapse = ","),
+                     n.sibs = n(),
+                     LLRpair = LLRpair[1]) %>%
+    dplyr::filter(n.sibs > 1) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(full.sib, LLRpair) 
+
+
+  full.sib.grp.infer <- apply(sib.pairs,1,
+      function(x) {rbind(combn(as.numeric(unlist(strsplit(x[1],",",perl=T))),
+                              m=2,
+                              simplify = T),x[2])}) %>%
+    dplyr::bind_cols() %>%
+    t %>%
+    dplyr::as_tibble() %>%
+    dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
+           kid.2 = ifelse(V1<V2, V2,V1)) %>%
+    dplyr::group_by(kid.1, kid.2) %>%
+    dplyr::summarise(prob=V3[1]) %>%
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(prob)) %>%
+    dplyr::mutate(kid.1 = as.character(subbingID(as.numeric(kid.1), max.id, id.ls)),
+                  kid.2 = as.character(subbingID(as.numeric(kid.2), max.id, id.ls)))
+
+  
+  write.table(full.sib.grp.infer,
+              paste0(outfolder.path,"/fullsib_seq_assignment.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  
+  ## perform pairwise sib-pair from the truth ped
+  full.sib.pair.truth.tbl <- RetrieveFullSibTruth(mating.factor.tbl)
+  ## run cluster analysis
+  
+  run.summary <- list()
+  run.summary$runtime <- runtime$toc - runtime$tic
+  run.summary$pairwise.tbl <- full_join(full.sib.grp.infer, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
+  run.summary$cluster.ls <- RetrieveFullSibGrpSeq(sequoia.ped.2, mating.factor.tbl, max.id, id.ls)
+  return(run.summary)
+  
+}
+
+```
+
+```{r, cache=T}
+fullsib.run1 <- simFulldata(replicate.indx = 1, pedigraph.version = 0.18, pedfac.opt= " -j 1", n.iter = 100, seed.num = 234)
+fullsib.run2 <- simFulldata(replicate.indx = 2, pedigraph.version = 0.18, pedfac.opt= " -j 1", n.iter = 100, seed.num = 334)
+fullsib.run3 <- simFulldata(replicate.indx = 3, pedigraph.version = 0.18, pedfac.opt= " -j 1", n.iter = 100, seed.num = 434)
+fullsib.run4 <- simFulldata(replicate.indx = 4, pedigraph.version = 0.18, pedfac.opt= " -j 1", n.iter = 100, seed.num = 534)
+fullsib.run5 <- simFulldata(replicate.indx = 5, pedigraph.version = 0.18, pedfac.opt= " -j 1", n.iter = 100, seed.num = 634)
+
+#save(fullsib.run1,fullsib.run2, fullsib.run3, fullsib.run4, fullsib.run5, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsibrun1_5.RData")
+
+##compare this with Sequoia, COLONY and Franz
+sequoia.run1 <- RunSequoia(replicate.indx = 1, seed.num = 234)
+
+```
+
+```{r, eval =FALSE}
+
+
+print("Calculating error distance ...")
+  out.ls$errorDistance <- partitionComparison::classificationErrorDistance(new("Partition",
+                                                       indiv.cluster.ls$cluster.infer),
+                                                   new("Partition",
+                                                       indiv.cluster.ls$cluster.truth))
+
+  
+  
+full.sib.roc.input <- lapply(1:5, function(i) {
+  roc.input.tbl <- eval(as.name(paste0("fullsib.run",i, collapse="", sep="")))$pairwise.tbl %>%
+    ungroup() %>%
+    #filter(!is.na(prob)) %>%
+    mutate(
+      prob = ifelse(is.na(prob), 0, prob)
+      is.true = ifelse(is.na(presence.T), 0, 1),
+           rep = i) %>%
+    rename("posterior" = prob) }) %>% bind_rows()
+  
+Plot.ROC.sibPair.plot(full.sib.roc.input)
+  
+#run1 <- simFulldata(replicate.indx = 2, n.snp = 300)
+
+ll.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/2/out/ll.txt"
+ped.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/2/out/ped.txt"
+
+ll.tbl <- read.table(ll.path) %>% as_tibble() %>% 
+  group_by(V1) %>%
+  mutate(a=row_number())
+ll.summary <- ll.tbl %>% group_by(V1) %>% summarise(n.entries = n())
+ll.plot.tbl <- left_join(ll.tbl, ll.summary, by="V1") %>%
+  mutate(new.index = a/n.entries+V1)
+ggplot() + geom_point(data=ll.plot.tbl, aes(x=new.index, y=V3))
+
+
+lag.ini.tbl <- read.table(ll.path) %>% as_tibble() %>% 
+  group_by(V1) %>%
+  mutate(a=row_number(), Diff = V3 - lag(V3)) 
+
+ped.mark.tbl <- read.table(ped.path) %>% as_tibble() %>% 
+  group_by(V1) %>%
+  mutate(a=row_number()) %>%
+  group_by(V3, V4) %>%
+  mutate(cluster = row_number())
+
+lag.tbl <- left_join(lag.ini.tbl, ped.mark.tbl, by="a")
+ggplot() + geom_histogram(data=lag.tbl, aes(x=Diff, fill=cluster==1, position = "fill")) +
+  facet_grid(cluster==1~.)
+
+```
+When I ran through this, the program was interrupted by an underflow problem with the ongoing message along the edge of the m-node. Eventually, I did rerendition the message propagation algorithm in concieving the carried message value are being carried on in log scale. Much to its dismay, this log transformation carries a cost in performance runtime as this log version of pedFac runs an average of 8-11x slower. An alternative solution is to construct a better prior that encourages pedFac to be more selective in forming half-sib family while the parent generation is not found. 
+
+
+
+Testing with the sequoia set
+```{r}
+out.path <- "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/halfSib/1"
+
+set.seed(133)
+data(Ped_HSg5, LH_HSg5)
+
+err.rate <- 5e-04
+error.rate.0 <- 1-(err.rate)-(err.rate/2)^2
+error.rate.1 <- (err.rate/2)^2
+error.rate.2 <- err.rate /2
+error.rate.3 <- 1-err.rate
+
+ErrM <<- matrix(c(error.rate.0,err.rate,error.rate.1,
+          error.rate.2, 1-err.rate, error.rate.2,
+          error.rate.1,err.rate,error.rate.0), ncol = 3)
+        
+geno.w.stat.simPedJ2 <- SimGeno(Ped = Ped_HSg5, nSnp = 200, ReturnStats = T)
+
+ParOUT <- sequoia(GenoM = geno.w.stat.simPedJ2$SGeno, LifeHistData = LH_HSg5, MaxSibIter = 0)
+
+
+SeqOUT <- sequoia(GenoM = geno.w.stat.simPedJ2$SGeno,
+                   SeqList = ParOUT,
+                   MaxSibIter = 10)
+
+chk <- PedCompare(Ped1 = Ped_HSg5, Ped2 = SeqOUT$Pedigree) 
+#chk$Counts["TT",,]
+
+## convert Sequoia's simulated Genotype table into compatible input file for pedFac
+
+id.simPedJ2 <- rownames(geno.w.stat.simPedJ2$SGeno)
+n.id.simPedJ2 <- dim(geno.w.stat.simPedJ2$SGeno )[1]
+birth.yr.simPedJ2 <- ParOUT$LifeHistPar$BirthYear
+geno.w.stat.simPedJ2$SGeno[geno.w.stat.simPedJ2$SGeno==-9] <- 3
+
+afreq.simPedJ2 <- apply(geno.w.stat.simPedJ2$SGeno, 2,
+                        function(x) {(sum(x==1)+2*sum(x==2))/(2*sum(x!=3))})
+
+geno.spread.tbl <- geno.w.stat.simPedJ2$SGeno %>%
+  as.tibble() %>%
+  mutate(id = id.simPedJ2)
+  
+
+geno.prefix <- dplyr::bind_cols(id=id.simPedJ2,
+                                  is.obs = rep(1, n.id.simPedJ2),
+                                  sex = 3-ParOUT$LifeHistPar$Sex,
+                                  yr = ParOUT$LifeHistPar$BirthYear,
+                                  is.founder = rep(1, n.id.simPedJ2))
+
+geno.join.tbl <- dplyr::left_join(geno.prefix, geno.spread.tbl, by="id")
+
+
+saveRDS(geno.join.tbl %>% dplyr::select(id) %>% dplyr::ungroup() %>% dplyr::mutate(id.num = dplyr::row_number()),
+          paste0(out.path,"/id.rds"))
+
+  geno.join.tbl <- geno.join.tbl %>%
+        dplyr::ungroup() %>%
+        dplyr::mutate(id = dplyr::row_number())
+
+  write.table(geno.join.tbl %>% arrange(id), paste0(out.path,"/geno.txt"),
+              sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
+
+  write(paste0(c("nIndiv ", n.id.simPedJ2, "\n",
+                 "nObsIndiv ", n.id.simPedJ2, "\n",
+                 "nGen ",6, "\n",
+                 "nSNP ", 200, "\n",
+                 "nMar 0\n",
+                 "maxID ", n.id.simPedJ2 + 1, "\n",
+                 "aFreq ", paste0(round(afreq.simPedJ2,4), collapse = " "), "\n",
+                 "epsilon ", paste0(rep(0.001, 200), collapse=" "), "\n",
+                 "obsFrac ", paste0(rep(round(n.id.simPedJ2/length(Ped_HSg5$id),3),6), collapse=" "), "\n",
+                 "minAge 1\n", 
+                 "maxAge 1\n", 
+                 "recentYr ", max(birth.yr.simPedJ2), "\n",
+                 "maxUnobsLayer ", 1),collapse = ""),
+        paste0(out.path,"/prior.txt")
+        )
+
+  
+  random.arr <- ceiling(c(runif(2,0,1e6)))
+  write.table(random.arr, paste0(out.path,"/","rand"),
+              sep = " ",eol = " ",quote = FALSE, col.names = FALSE, row.names = FALSE)
+  
+  pedigraph.path <- "/Users/thomasn/repo/pedigree-factor-graphs/src"
+  pedigraph.version <- 0.18
+  n.iter <- 10
+  pedfac.opt <- ""
+  
+  pedfac.call <- paste0(pedigraph.path,"/pedigraph_",pedigraph.version, " -d ", out.path,
+                         " -n ", n.iter, 
+                         " -r ",out.path,"/rand ", pedfac.opt, collapse = "")
+  
+  
+  system(pedfac.call,ignore.stderr = F, ignore.stdout = F)
+
+
+
+```
+

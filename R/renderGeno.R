@@ -73,7 +73,7 @@ writeIntermedGeno <- function(param, preservesID=F, preservesGeno = F) {
     dplyr::tbl_df()
 
   geno.ls <- list()
-  geno.ls$max.id <- max(geno.tbl[,1])
+
   geno.ls$n.indiv <- nrow(geno.tbl)
   geno.ls$n.obs.indiv <- sum(geno.tbl[,2]==1)
   geno.ls$min.yr <- min(geno.tbl[,4])
@@ -89,11 +89,16 @@ writeIntermedGeno <- function(param, preservesID=F, preservesGeno = F) {
   ##this opt may change if and only we feed the pedfac with initial pedigree config
   #if(param$max.gen == 0) geno.ls$is.founder <- 1*(geno.ls$gen ==max(geno.ls$gen))
 
-  if(param$observe.frac == -1) {
-    geno.ls$observe.frac <- rep(-1, geno.ls$n.gen)
+  if (length(param$observe.frac) > 1) {
+    if(geno.ls$n.gen == length(geno.ls$observe.frac)) {
+      geno.ls$observe.frac <- param$observe.frac
+    } else {
+      geno.ls$observe.frac <- rep(0, geno.ls$n.gen)
+      geno.ls$observe.frac[1:length(geno.ls$observe.frac)] <- param$observe.frac
+    }
   } else {
-    geno.ls$observe.frac <- rep(0, geno.ls$n.gen)
-    geno.ls$observe.frac[(geno.ls$gen)+1] <- param$observe.frac
+      geno.ls$observe.frac <- rep(0, geno.ls$n.gen)
+      geno.ls$observe.frac[(geno.ls$gen)+1] <- param$observe.frac
   }
 
   geno.ls$n.SNP <- (ncol(geno.tbl)-4)/2
@@ -245,10 +250,13 @@ writeIntermedGeno <- function(param, preservesID=F, preservesGeno = F) {
 
   if (preservesID) {
 
+    geno.ls$max.id <- max(geno.tbl[,1])
     saveRDS(tibble(id.num=1:geno.ls$max.id, id=1:geno.ls$max.id),
             paste0(param$output.path,"/id.rds"))
+
     } else {
 
+      geno.ls$max.id <- length(geno.tbl[,1])
       saveRDS(geno.join.tbl %>% dplyr::select(id) %>% dplyr::ungroup() %>% dplyr::mutate(id.num = dplyr::row_number()),
               paste0(param$output.path,"/id.rds"))
 
@@ -279,6 +287,8 @@ writeIntermedGeno <- function(param, preservesID=F, preservesGeno = F) {
                  "maxUnobsLayer ", param$max.unobs ),collapse = ""),
         paste0(param$output.path,"/prior.txt")
         )
+
+  #pedfac.prior.param <- list(n.indiv = geno.ls$n.indiv,  n.obs.indiv= geno.ls$n.obs.indiv, n.gen = geno.ls$n.gen, n.snp = geno.ls$n.SNP, max.id = )
 }
 
 #' simulate genotype entry based on mating table (kid, pa, ma)
@@ -305,8 +315,9 @@ simGeno <- function(mating.path = "",
                     alpha.ad = 10, beta.ad = 10,
                     geno.err = 0.02,
                     missing.unk = 0.005,
-                    skip.gen.ls = NA,
                     random.seed = 46,
+                    sampling.frac.rate = 1, # treat as r.v.
+                    sample.frac.gen = -1, # which generation sample rate for - 0 being the most recent generation
                     out.path = tempdir()) {
   set.seed(random.seed)
 
@@ -413,10 +424,13 @@ simGeno <- function(mating.path = "",
                           gen = max(gen.indx) - gen.indx,
                           geno.long) %>% as.tibble()
 
-  ##remove any individuals from the generation censor blacklist
-  if (!is.na(skip.gen.ls[1])) {
-    geno.input.tbl <- geno.input.tbl %>%
-      dplyr::filter(!gen %in% skip.gen.ls)
+  total.gen <- max(gen.indx)+1
+  sample.frac <- rep(1, total.gen) # started with the most recent generation - which is the lowest # of gen.idx
+  # process sampling frac
+  if(sample.frac.gen[1] != -1) {
+    sample.frac[sample.frac.gen+1] <- sampling.frac.rate
+    is.avail <- rbinom(length(gen.indx),1,sample.frac[gen.indx+1])==1
+    geno.input.tbl <- geno.input.tbl[is.avail, ]
   }
 
   dir.create(file.path(out.path), recursive = TRUE)
@@ -427,7 +441,7 @@ simGeno <- function(mating.path = "",
   param<-list(geno.path=geno.path,
               output.path=out.path,
               random.seed=random.seed,
-              observe.frac= 1,
+              observe.frac= sample.frac,
               af = maf,
               max.unobs=1, max.gen=0, #max.gen as the number extend past the current generation grp
               min.age=1, max.age=1, geno.err=geno.err,
@@ -436,5 +450,7 @@ simGeno <- function(mating.path = "",
   message("writing final files to ", out.path)
 
   writeIntermedGeno(param, preservesID = TRUE, preservesGeno = TRUE)
+
+  return(geno.input.tbl)
 }
 

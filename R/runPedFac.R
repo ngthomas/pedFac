@@ -10,7 +10,7 @@
 #' @param random.seed postive integer. Random seed to pass on pedigree sampler. Default:26.
 #' @param n.iter positive integer. Number of sampling iteration. Default: 1.
 #' @param cyclic.choice integer from 0 to 2. Choices of handling loops or cyclic path in pedigree. Default: 0. 0 - not allowing loops; 1 - throttle method; 2 - decimation method
-#' @param observe.frac float value from 0 to 1. Assumed sampling fraction. Default: 0.8; use -1 for unknown.
+#' @param observe.frac float value from 0 to 1. Assumed sampling fraction. Default: 0.8.
 #' @param max.unobs nonnegative integer. Maximum number of unobserved individuals allowed in between any two individuals. Default: 1.
 #' @param max.gen nonnegative integer. Number of predecessor generation(s) considered beyond the earliest observed generation. Default: 0. Setting it as 0 means that individuals of the earliest observed generation are treated as founders.
 #'
@@ -74,6 +74,7 @@ runPedFac <- function(geno.path,
   if (max.unobs <0) stop("max.unobs must be equal or greater than 0")
   if (max.gen <0) stop("max.gen must be equal or greater than 0")
 
+  if (observe.frac <0 || observe.frac > 1) stop("sample.frac must be in between 0 and 1. ")
   if (min.age <=0) stop("min.age must be greater than 0")
   if (max.age <=0) stop("max.age must be greater than 0")
   if (max.age < min.age) stop("min.age is much greater than max.age")

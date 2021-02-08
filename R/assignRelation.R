@@ -15,7 +15,7 @@ retrieveGrandparents <- function(df, max.id, id.ls) {
 
   dplyr::inner_join(ped.join.pa, ped.grandma, by=c("iter","ma")) %>%
     dplyr::select(-pa, -ma) %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, kid) %>%
     dplyr::mutate(grandpa.pa = as.character(subbingID(grandpa.pa, max.id, id.ls)),
                   grandma.pa = as.character(subbingID(grandma.pa, max.id, id.ls)),
@@ -33,7 +33,7 @@ retrieveParent <- function(df, max.id, id.ls) {
   n.iter <- max(df$iter)+1
 
   df %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, kid) %>%
     dplyr::mutate(pa.id = as.character(subbingID(pa, max.id, id.ls)),
                   ma.id = as.character(subbingID(ma, max.id, id.ls))) %>%
@@ -48,8 +48,9 @@ retrieveParent <- function(df, max.id, id.ls) {
 
 
 RetrieveFullSib <- function(out.ped.tbl, max.id, id.ls) {
+
   sib.pairs <- out.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, pa, ma) %>%
     dplyr::summarise(full.sib = paste0(kid, collapse = ","),
                      n.sibs = n()) %>%
@@ -69,6 +70,8 @@ RetrieveFullSib <- function(out.ped.tbl, max.id, id.ls) {
     dplyr::bind_cols() %>%
     t %>%
     dplyr::as_tibble() %>%
+    dplyr::mutate(V1 = as.numeric(V1),
+                  V2 = as.numeric(V2)) %>%
     dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
            kid.2 = ifelse(V1<V2, V2,V1)) %>%
     dplyr::group_by(kid.1, kid.2) %>%
@@ -81,26 +84,24 @@ RetrieveFullSib <- function(out.ped.tbl, max.id, id.ls) {
   return(sib.pair.prob.tbl)
 }
 
+## assume input file - is 3column with numeric type
 RetrieveFullSibTruth <- function(mating.factor.tbl) {
-  full.sib.grp.truth.tbl <- mating.factor.tbl %>%
-    dplyr::group_by(pa, ma) %>%
-    dplyr::summarise(full.sib = paste0(kid, collapse = ","),
-                     n.sibs = n()) %>%
-    dplyr::filter(n.sibs > 1) %>% ungroup() %>%
-    dplyr::mutate(cluster=dplyr::row_number())
 
-  full.sib.pair.truth.tbl <- full.sib.grp.truth.tbl %>%
-    tidyr::separate_rows(full.sib) %>%
-    dplyr::group_by(cluster) %>%
-    split(.$cluster) %>%
-    purrr::map(., 3) %>%
-    purrr::map(~combn(.x, m = 2)) %>%
-    purrr::map(~t(.x)) %>%
-    purrr::map_dfr(dplyr::as_tibble)%>%
-    dplyr::mutate(kid.1 = as.character(ifelse(V1<V2, V1,V2)),
-                  kid.2 = as.character(ifelse(V1<V2, V2,V1)),
-                  presence.T =1) %>%
-    select(kid.1, kid.2, presence.T)
+  full.sib.pair.truth.tbl <- mating.factor.tbl %>%
+    dplyr::group_by(pa, ma) %>%
+    dplyr::summarise(full.sib = list(kid)) %>%
+    dplyr::filter(map_int(full.sib, length)  > 1) %>%
+    ungroup() %>%
+    mutate(sib.tib = map(full.sib, .f = function(x) {
+      expand_grid(kid.1 = x, kid.2 = x)
+    })) %>%
+    select(sib.tib) %>%
+    unnest(cols="sib.tib") %>%
+    filter(kid.1 < kid.2) %>%
+    mutate(presence.T =1,
+           kid.1= as.character(kid.1),
+           kid.2= as.character(kid.2))
+
   return(full.sib.pair.truth.tbl)
 }
 
@@ -109,19 +110,19 @@ RetrieveFullSibGrp <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls, is.sin
 
   if (!is.single.ped.entry) {
   sib.grp <- out.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, pa, ma) %>%
     dplyr::summarise(full.sib = paste0(kid, collapse = ","),
-                     n.sibs = n()) %>%
+                     n.sib.infer = n()) %>%
     dplyr::ungroup() %>%
-    dplyr::group_by(full.sib, n.sibs) %>%
+    dplyr::group_by(full.sib, n.sib.infer) %>%
     dplyr::summarise(n.obs = n())
 
   n.iter <- max(out.ped.tbl$iter)+1
 
   sib.cluster.prob.tbl <- sib.grp %>%
     dplyr::ungroup() %>%
-    dplyr::arrange(desc(n.obs), desc(n.sibs)) %>%
+    dplyr::arrange(desc(n.obs), desc(n.sib.infer)) %>%
     mutate(posterior = n.obs/n.iter,
            cluster = row_number()) %>%
     separate_rows(full.sib)
@@ -145,32 +146,33 @@ RetrieveFullSibGrp <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls, is.sin
   greedy.cluster.tbl <- GreedySearch(sib.cluster.prob.tbl)
 
   infer.cluster.ls <- greedy.cluster.tbl %>%
-    group_by(cluster, posterior, n.sibs) %>%
-    summarise(full.sib = paste0(full.sib, sep="", collapse = ","))
+    group_by(cluster, posterior, n.sib.infer) %>%
+    summarise(infer.grp = paste0(full.sib, sep="", collapse = ","))
 
   } else {
 
     infer.cluster.ls <- out.ped.tbl %>%
       dplyr::group_by(pa, ma) %>%
-      dplyr::summarise(full.sib = paste0(kid, collapse = ","),
-                       n.sibs = n()) %>%
+      dplyr::summarise(infer.grp = paste0(kid, collapse = ","),
+                       n.sib.infer = n()) %>%
       dplyr::ungroup() %>%
       dplyr::select(-pa, -ma) %>%
-      dplyr::arrange(desc(n.sibs)) %>%
+      dplyr::arrange(desc(n.sib.infer)) %>%
       mutate(cluster = row_number())
 
   }
   ####
 
   truth.sib.grp <- truth.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(pa, ma) %>%
-    dplyr::summarise(full.sib.truth = paste0(kid, collapse = ",")) %>%
+    dplyr::summarise(truth.grp = paste0(kid, collapse = ","),
+                     n.sib.truth = n()) %>%
     ungroup() %>%
-    select(full.sib.truth)
+    select(truth.grp, n.sib.truth)
 
   CountIntersect <- function(infer.cluster, truth.cluster) {
-    intersect(unlist(strsplit(infer.cluster, ",")), unlist(strsplit(truth.cluster, ","))) %>%
+    intersect(unlist(strsplit(infer.cluster, ",",fixed=T)), unlist(strsplit(truth.cluster, ",",fixed=T))) %>%
       length()
   }
 
@@ -178,62 +180,65 @@ RetrieveFullSibGrp <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls, is.sin
     unlist(strsplit(cluster, ",")) %>% length
   }
 
-  n.matches.infer.truth <- expand_grid(infer.grp = infer.cluster.ls$full.sib, truth.sib.grp) %>%
-    group_by(infer.grp, full.sib.truth) %>%
-    mutate(n.match = CountIntersect(infer.grp, full.sib.truth),
-           n.sib.infer = CountNSib(infer.grp),
-           n.sib.truth = CountNSib(full.sib.truth),
-           n.diff = abs(n.sib.infer - n.sib.truth))
+  n.matches.infer.truth <- expand_grid(infer.grp = infer.cluster.ls$infer.grp , truth.grp=truth.sib.grp$truth.grp) %>%
+    group_by(infer.grp, truth.grp) %>%
+    mutate(n.match = CountIntersect(infer.grp, truth.grp))
+
+  cluster.join.status <- left_join(infer.cluster.ls, n.matches.infer.truth, by="infer.grp") %>%
+    left_join(., truth.sib.grp, by="truth.grp") %>%
+    group_by(infer.grp, truth.grp) %>%
+    mutate(n.diff = abs(n.sib.infer - n.sib.truth)) %>%
+    arrange(desc(n.match), n.diff)
+
 
   out.ls <- list()
 
-  out.ls$posterior.tbl <- left_join(infer.cluster.ls %>% rename(infer.grp="full.sib"),
-                                    n.matches.infer.truth %>%
-    arrange(desc(n.match), n.diff) %>%
-    group_by(infer.grp) %>%
+  out.ls$posterior.tbl <-
+    cluster.join.status %>%
+    group_by(infer.grp, cluster) %>%
     summarise(max.match = n.match[1],
               n.diff = n.diff[1],
               n.sib.infer = n.sib.infer[1],
-              n.sib.truth = n.sib.truth[1])) %>%
+              n.sib.truth = n.sib.truth[1],
+              prob=posterior[1]) %>%
     group_by(cluster) %>%
     mutate(is.exact.match = (max.match == n.sib.infer && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess =max(n.sib.infer - max.match, 0),
            # number of elements missing in the inferred cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
-           )
+           n.missing = max(n.sib.truth - max.match, 0)
+           ) %>% ungroup()
 
-  out.ls$truth.cluster.assign.ls <- left_join(truth.sib.grp,
-                                     n.matches.infer.truth %>%
-                                       arrange(desc(n.match), n.diff) %>%
-                                       group_by(full.sib.truth) %>%
+  out.ls$truth.cluster.assign.ls <- cluster.join.status %>%
+    group_by(truth.grp) %>%
                                        summarise(max.match = n.match[1],
                                                  n.diff = n.diff[1],
                                                  n.sib.infer = n.sib.infer[1],
-                                                 n.sib.truth = n.sib.truth[1])) %>%
-    group_by(full.sib.truth) %>%
+                                                 n.sib.truth = n.sib.truth[1],
+                                                 prob=posterior[1]) %>%
+    group_by(truth.grp) %>%
     mutate(is.exact.match = (max.match == n.sib.truth && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements than the truth
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess = max(n.sib.infer - max.match, 0),
            # number of elements missing in the truth cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
-    )
+           n.missing = max(n.sib.truth - max.match, 0)
+    ) %>% ungroup()
 
   max.cluster.indx <- infer.cluster.ls$cluster %>% max
 
   ## mainly used to calculate partition distance
   out.ls$indiv.cluster.ls <- full_join(infer.cluster.ls %>% ungroup() %>%
-    separate_rows(full.sib) %>%
-    rename(indiv.indx = "full.sib", cluster.infer = "cluster") %>%
-    select(cluster.infer, indiv.indx),
-    truth.sib.grp %>% ungroup() %>%
-    mutate(cluster = row_number()) %>%
-    separate_rows(full.sib.truth) %>%
-    rename(indiv.indx = "full.sib.truth", cluster.truth = "cluster") %>%
-    select(cluster.truth, indiv.indx),
-  by = "indiv.indx") %>%
+              separate_rows(infer.grp) %>%
+              rename(indiv.indx = "infer.grp", cluster.infer = "cluster") %>%
+              select(cluster.infer, indiv.indx),
+            truth.sib.grp %>% ungroup() %>%
+              mutate(cluster = row_number()) %>%
+              separate_rows(truth.grp) %>%
+              rename(indiv.indx = "truth.grp", cluster.truth = "cluster") %>%
+              select(cluster.truth, indiv.indx),
+            by = "indiv.indx") %>%
     mutate(cluster.infer = ifelse(is.na(cluster.infer), row_number()+max.cluster.indx, cluster.infer))
 
   return(out.ls)
@@ -243,19 +248,29 @@ RetrieveFullSibGrp <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls, is.sin
 # sequoia verion
 RetrieveFullSibGrpSeq <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls){
 
-  cluster.infer.ls <- out.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+  if ("LLRpair" %in% colnames(out.ped.tbl)) {
+    out.ped.tbl <- out.ped.tbl %>%
+      ungroup() %>%
+      mutate(norm.LLRpair = ifelse(is.na(LLRpair),
+                                                0,
+                                                exp(LLRpair)),
+                          prob=norm.LLRpair/max(norm.LLRpair)) }
+
+
+  cluster.infer.ls <-out.ped.tbl %>%
+    ungroup() %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(pa, ma) %>%
     dplyr::summarise(infer.grp = paste0(kid, collapse = ","),
                      n.sib.infer = n(),
-                     LLR = LLRpair[1]) %>%
+                     prob = prob[1]) %>%
     dplyr::ungroup() %>%
     dplyr::select(-pa, -ma) %>%
-    dplyr::arrange(desc(LLR), desc(n.sib.infer)) %>%
+    dplyr::arrange(desc(prob), desc(n.sib.infer)) %>%
     mutate(cluster = row_number())
 
   truth.sib.grp <- truth.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(pa, ma) %>%
     dplyr::summarise(truth.grp = paste0(kid, collapse = ","),
                      n.sib.truth = n()) %>%
@@ -289,14 +304,15 @@ RetrieveFullSibGrpSeq <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls){
                                       summarise(max.match = n.match[1],
                                                 n.diff = n.diff[1],
                                                 n.sib.infer = n.sib.infer[1],
-                                                n.sib.truth = n.sib.truth[1]) %>%
+                                                n.sib.truth = n.sib.truth[1],
+                                                prob = prob[1]) %>%
     group_by(cluster) %>%
     mutate(is.exact.match = (max.match == n.sib.infer && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess = max(n.sib.infer - max.match, 0),
            # number of elements missing in the inferred cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
+           n.missing = max(n.sib.truth - max.match, 0)
     )
 
   out.ls$truth.cluster.assign.ls <- cluster.join.status %>%
@@ -304,14 +320,15 @@ RetrieveFullSibGrpSeq <- function(out.ped.tbl, truth.ped.tbl, max.id, id.ls){
                                                 summarise(max.match = n.match[1],
                                                           n.diff = n.diff[1],
                                                           n.sib.infer = n.sib.infer[1],
-                                                          n.sib.truth = n.sib.truth[1]) %>%
+                                                          n.sib.truth = n.sib.truth[1],
+                                                          prob = prob[1]) %>%
     group_by(truth.grp) %>%
     mutate(is.exact.match = (max.match == n.sib.truth && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements than the truth
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess = max(n.sib.infer - max.match, 0),
            # number of elements missing in the truth cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
+           n.missing = max(n.sib.truth - max.match, 0)
     )
 
 
@@ -343,7 +360,7 @@ RetrieveFullSibGrpCOLONY <- function(infer.cluster.tbl, truth.ped.tbl, max.id, i
 
 
   truth.sib.grp <- truth.ped.tbl %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(pa, ma) %>%
     dplyr::summarise(truth.grp = paste0(kid, collapse = ","),
                      n.sib.truth = n()) %>%
@@ -377,14 +394,15 @@ RetrieveFullSibGrpCOLONY <- function(infer.cluster.tbl, truth.ped.tbl, max.id, i
     summarise(max.match = n.match[1],
               n.diff = n.diff[1],
               n.sib.infer = n.sib.infer[1],
-              n.sib.truth = n.sib.truth[1]) %>%
+              n.sib.truth = n.sib.truth[1],
+              prob=prob.incl[1]) %>%
     group_by(cluster) %>%
     mutate(is.exact.match = (max.match == n.sib.infer && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess = max(n.sib.infer - max.match, 0),
            # number of elements missing in the inferred cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
+           n.missing = max(n.sib.truth - max.match, 0)
     )
 
   out.ls$truth.cluster.assign.ls <- cluster.join.status %>%
@@ -392,14 +410,15 @@ RetrieveFullSibGrpCOLONY <- function(infer.cluster.tbl, truth.ped.tbl, max.id, i
     summarise(max.match = n.match[1],
               n.diff = n.diff[1],
               n.sib.infer = n.sib.infer[1],
-              n.sib.truth = n.sib.truth[1]) %>%
+              n.sib.truth = n.sib.truth[1],
+              prob=prob.incl[1]) %>%
     group_by(truth.grp) %>%
     mutate(is.exact.match = (max.match == n.sib.truth && n.diff == 0),
            # situation in which inferr cluster missing the number of elements
            # situation in which inferr cluster has additional elements than the truth
-           n.excess = ifelse(n.sib.infer > n.sib.truth, n.sib.infer - max.match, 0),
+           n.excess =  max(n.sib.infer - max.match, 0),
            # number of elements missing in the truth cluster
-           n.missing = ifelse(n.sib.truth > n.sib.infer,n.sib.truth - max.match, 0)
+           n.missing = max(n.sib.truth - max.match, 0)
     )
 
 
@@ -421,9 +440,9 @@ RetrieveFullSibGrpCOLONY <- function(infer.cluster.tbl, truth.ped.tbl, max.id, i
 }
 
 
-retrieveHalfSib <- function(df, max.id, id.ls) {
+RetrieveHalfSib <- function(df, FS.df, max.id, id.ls) {
   sib.pa.pairs <- df %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, pa) %>%
     dplyr::summarise(sib = paste0(kid, collapse = ","),
                      n.sibs = n()) %>%
@@ -433,7 +452,7 @@ retrieveHalfSib <- function(df, max.id, id.ls) {
     unlist()
 
   sib.ma.pairs <- df %>%
-    dplyr::filter(kid<=max.id) %>%
+    dplyr::filter(as.numeric(kid)<=max.id) %>%
     dplyr::group_by(iter, ma) %>%
     dplyr::summarise(sib = paste0(kid, collapse = ","),
                      n.sibs = n()) %>%
@@ -442,30 +461,75 @@ retrieveHalfSib <- function(df, max.id, id.ls) {
     dplyr::select(sib) %>%
     unlist()
 
-  if(is.null(nrow(sib.ma.pairs)) && is.null(ncol(sib.pa.pairs))) return()
+  if(is.null(length(sib.ma.pairs)) && is.null(length(sib.pa.pairs))) return()
 
   n.iter <- max(df$iter)+1
 
   all.sibs <- lapply(c(sib.pa.pairs, sib.ma.pairs),
-         function(x) combn(as.numeric(unlist(strsplit(x,",",perl=T))),
+         function(x) combn(as.numeric(unlist(strsplit(x,",",fixed=T))),
                            m=2,
-                           simplify = F)) %>%
+                           simplify = T)) %>%
     dplyr::bind_cols() %>%
     t %>%
-    dplyr::tbl_df() %>%
+    dplyr::as_tibble() %>%
+    dplyr::mutate(V1=as.numeric(V1),
+                  V2=as.numeric(V2)) %>%
     dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
            kid.2 = ifelse(V1<V2, V2,V1)) %>%
     dplyr::group_by(kid.1, kid.2)%>%
-    dplyr::summarise(prob=n()/n.iter)
-
-  dplyr::full_join(all.sibs, retrieveFullSib(df, max.id), by=c("kid.1", "kid.2")) %>%
-    dplyr::group_by(kid.1, kid.2) %>%
-    dplyr::summarise(prob = ifelse(is.na(prob.y),prob.x,prob.x-(2*prob.y))) %>%
-    dplyr::filter(prob>0) %>%
-    dplyr::ungroup() %>%
-    dplyr::arrange(desc(prob)) %>%
+    dplyr::summarise(prob=n()/n.iter) %>%
     dplyr::mutate(kid.1 = as.character(subbingID(kid.1, max.id, id.ls)),
                   kid.2 = as.character(subbingID(kid.2, max.id, id.ls)))
+
+  dplyr::full_join(all.sibs, FS.df , by=c("kid.1", "kid.2")) %>%
+    dplyr::group_by(kid.1, kid.2) %>%
+    dplyr::summarise(prob = ifelse(is.na(prob.y),prob.x,prob.x-(2*prob.y))) %>%
+    dplyr::filter(prob!=0) %>%
+    dplyr::ungroup() %>%
+    dplyr::arrange(desc(prob))
+}
+
+
+RetrieveHalfSibTruth <- function(df, FS.df) {
+  sib.pa.pairs <- df %>%
+    dplyr::group_by(pa) %>%
+    dplyr::summarise(sib = paste0(kid, collapse = ","),
+                     n.sibs = n()) %>%
+    dplyr::filter(n.sibs > 1) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(sib) %>%
+    unlist()
+
+  sib.ma.pairs <- df %>%
+    dplyr::group_by(ma) %>%
+    dplyr::summarise(sib = paste0(kid, collapse = ","),
+                     n.sibs = n()) %>%
+    dplyr::filter(n.sibs > 1) %>%
+    dplyr::ungroup() %>%
+    dplyr::select(sib) %>%
+    unlist()
+
+  if(is.null(length(sib.ma.pairs)) && is.null(length(sib.pa.pairs))) return()
+
+
+  all.sibs <- lapply(c(sib.pa.pairs, sib.ma.pairs),
+                     function(x) combn(as.numeric(unlist(strsplit(x,",",fixed=T))),
+                                       m=2,
+                                       simplify = T)) %>%
+    dplyr::bind_cols() %>%
+    t %>%
+    dplyr::as_tibble() %>%
+    dplyr::mutate(V1=as.numeric(V1),
+                  V2=as.numeric(V2)) %>%
+    dplyr::mutate(kid.1 = as.character(ifelse(V1<V2, V1,V2)),
+                  kid.2 = as.character(ifelse(V1<V2, V2,V1))) %>%
+    dplyr::group_by(kid.1, kid.2)%>%
+    dplyr::summarise(presence.T =1)  %>%
+    select(kid.1, kid.2, presence.T)
+
+  dplyr::full_join(all.sibs, FS.df , by=c("kid.1", "kid.2")) %>%
+    dplyr::group_by(kid.1, kid.2) %>%
+    dplyr::summarise(presence.T = ifelse(is.na(presence.T.y),presence.T.x,presence.T.x-(presence.T.y)))
 }
 
 

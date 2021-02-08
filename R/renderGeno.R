@@ -83,18 +83,23 @@ writeIntermedGeno <- function(param, preservesID=F, preservesGeno = F) {
 
   geno.ls$gen <- floor((geno.ls$max.yr-geno.tbl[,4])/param$min.age) %>% unlist()
 
-  geno.ls$n.gen <- max(geno.ls$gen, 2)+param$max.gen
+  geno.ls$n.gen <- max(geno.ls$gen+1, 2)+param$max.gen
   geno.ls$is.founder <- rep(1, geno.ls$n.indiv)
 
   ##this opt may change if and only we feed the pedfac with initial pedigree config
   #if(param$max.gen == 0) geno.ls$is.founder <- 1*(geno.ls$gen ==max(geno.ls$gen))
 
   if (length(param$observe.frac) > 1) {
-    if(geno.ls$n.gen == length(geno.ls$observe.frac)) {
+    #message(paste("n.gen", geno.ls$n.gen))
+    #message(paste("observe.frac", param$observe.frac))
+    if(geno.ls$n.gen == length(param$observe.frac)) {
       geno.ls$observe.frac <- param$observe.frac
-    } else {
+    } else if (geno.ls$n.gen > length(param$observe.frac)) {
       geno.ls$observe.frac <- rep(0, geno.ls$n.gen)
       geno.ls$observe.frac[1:length(geno.ls$observe.frac)] <- param$observe.frac
+    } else {
+      warning("observe frac in param is longer than n.gen ")
+      return()
     }
   } else {
       geno.ls$observe.frac <- rep(0, geno.ls$n.gen)
@@ -316,9 +321,14 @@ simGeno <- function(mating.path = "",
                     geno.err = 0.02,
                     missing.unk = 0.005,
                     random.seed = 46,
+                    alpha.missing.indiv = NA, beta.missing.indiv = NA,
+                    alpha.weight.missing.loci = NA, beta.weight.missing.loci = NA,
+                    num.unrelated.added.per.gen = 0,
+                    indiv.censor.ls  = NA,
                     sampling.frac.rate = 1, # treat as r.v.
                     sample.frac.gen = -1, # which generation sample rate for - 0 being the most recent generation
-                    out.path = tempdir()) {
+                    out.path = tempdir(),
+                    max.unobs.layer = 1) {
   set.seed(random.seed)
 
   if(file.exists(mating.path)) {
@@ -336,6 +346,8 @@ simGeno <- function(mating.path = "",
   if (ncol(mating.tbl) != 3) {
     stop("the mating table is not a 3-column table. ")
   }
+
+  colnames(mating.tbl) <- c("kid", "pa", "ma")
 
   mating.factor <- factor(unlist(mating.tbl))
   mating.lvl <- levels(mating.factor)
@@ -413,24 +425,118 @@ simGeno <- function(mating.path = "",
   is.missing <- rbinom(n.id*n.snp, 1, missing.unk) %>% matrix(ncol=n.snp, by=T)
   is.avail <- 1-is.missing
 
+  if (!is.na(alpha.missing.indiv) && !is.na(beta.missing.indiv) &&
+      !is.na(alpha.weight.missing.loci) && !is.na(beta.weight.missing.loci)) {
+
+    f.indiv <- rbeta(n.id, alpha.missing.indiv, beta.missing.indiv)
+    # also, the loci themselves have weights associated with them.
+    # That wants to have a max at 0.
+    w.loci <- rbeta(n.snp, alpha.weight.missing.loci, beta.weight.missing.loci)
+
+    # then the number missing in each indiv is
+    nmiss <- floor(n.snp * f.indiv)
+
+    # actual sites missing in each individual:
+    miss_sites <- lapply(nmiss, function(x) {
+      sample(1:n.snp, size = x, replace = FALSE, prob = w.loci)
+    })
+
+    miss.index <- miss_sites%>%
+      set_names(seq_along(.))%>%
+      enframe %>%
+      unnest(cols="value") %>%
+      mutate(name=as.numeric(name)) %>%
+      as.matrix()
+
+    is.missing <- matrix(0, nrow=n.id, ncol=n.snp)
+    is.missing[miss.index] <- 1
+    is.avail <- 1-is.missing
+  }
+
   final.geno.1 <- (abs(geno.1-make.err.1)*is.avail) +(-1*is.missing)
   final.geno.2 <- (abs(geno.2-make.err.2)*is.avail) +(-1*is.missing)
 
   geno.long <- cbind(final.geno.1, final.geno.2)[,rbind(1:n.snp, (1:n.snp)+n.snp) %>% as.vector()]
 
-  geno.input.tbl <- cbind(sorted.id,
-                          rep(1, n.id),
-                          indiv.sex,
+  geno.input.tbl <- cbind(id = sorted.id,
+                          obs = rep(1, n.id),
+                          sex =indiv.sex,
                           gen = max(gen.indx) - gen.indx,
                           geno.long) %>% as.tibble()
 
   total.gen <- max(gen.indx)+1
+
+  ## add in unrelated indiv to any generation, except to the most recent one
+
+  if(num.unrelated.added.per.gen != 0) {
+    n.unrel <- (total.gen -1)*num.unrelated.added.per.gen
+
+    geno.1.unrel <- rbinom(n.unrel*n.snp, 1,maf) %>% matrix(ncol=n.snp, by=T)
+    geno.2.unrel <- rbinom(n.unrel*n.snp, 1,maf) %>% matrix(ncol=n.snp, by=T)
+    indiv.sex.unrel <- rbinom(n.unrel, 1, 0.5)+1
+
+    # impose genotype error at the end
+    make.err.1 <- rbinom(n.unrel*n.snp, 1, geno.err/2) %>% matrix(ncol=n.snp, by=T)
+    make.err.2 <- rbinom(n.unrel*n.snp, 1, geno.err/2) %>% matrix(ncol=n.snp, by=T)
+
+    is.missing <- rbinom(n.unrel*n.snp, 1, missing.unk) %>% matrix(ncol=n.snp, by=T)
+    is.avail <- 1-is.missing
+
+    if (!is.na(alpha.missing.indiv) && !is.na(beta.missing.indiv) &&
+        !is.na(alpha.weight.missing.loci) && !is.na(beta.weight.missing.loci)) {
+
+      f.indiv <- rbeta(n.unrel, alpha.missing.indiv, beta.missing.indiv)
+      w.loci <- rbeta(n.snp, alpha.weight.missing.loci, beta.weight.missing.loci)
+      nmiss <- floor(n.snp * f.indiv)
+
+      # actual sites missing in each individual:
+      miss_sites <- lapply(nmiss, function(x) {
+        sample(1:n.snp, size = x, replace = FALSE, prob = w.loci)
+      })
+
+      miss.index <- miss_sites%>%
+        set_names(seq_along(.))%>%
+        enframe %>%
+        unnest(cols="value") %>%
+        mutate(name=as.numeric(name)) %>%
+        as.matrix()
+
+      is.missing <- matrix(0, nrow=n.id, ncol=n.snp)
+      is.missing[miss.index] <- 1
+      is.avail <- 1-is.missing
+    }
+
+    final.geno.1.unrel <- (abs(geno.1.unrel-make.err.1)*is.avail) +(-1*is.missing)
+    final.geno.2.unrel <- (abs(geno.2.unrel-make.err.2)*is.avail) +(-1*is.missing)
+
+    geno.long.unrel <- cbind(final.geno.1.unrel, final.geno.2.unrel)[,rbind(1:n.snp, (1:n.snp)+n.snp) %>% as.vector()]
+
+    geno.input.unrel.tbl <- cbind(
+      id = as.character(max(as.numeric(sorted.id))+(1:n.unrel)),
+                            obs = rep("1", n.unrel),
+                            sex = indiv.sex.unrel,
+                            gen = rep(0:(max(gen.indx)-1),each=num.unrelated.added.per.gen),
+                            geno.long.unrel) %>% as.tibble()
+
+    geno.input.tbl <- bind_rows(geno.input.tbl,
+                                geno.input.unrel.tbl)
+
+    max.gen <- max(gen.indx)
+    gen.indx <- c(gen.indx, rep(max.gen:1,each=num.unrelated.added.per.gen))
+  }
+
+
   sample.frac <- rep(1, total.gen) # started with the most recent generation - which is the lowest # of gen.idx
   # process sampling frac
   if(sample.frac.gen[1] != -1) {
     sample.frac[sample.frac.gen+1] <- sampling.frac.rate
     is.avail <- rbinom(length(gen.indx),1,sample.frac[gen.indx+1])==1
     geno.input.tbl <- geno.input.tbl[is.avail, ]
+  }
+
+  if (!is.na(indiv.censor.ls )) {
+    geno.input.tbl <- geno.input.tbl %>%
+      filter(!id %in% indiv.censor.ls)
   }
 
   dir.create(file.path(out.path), recursive = TRUE)
@@ -443,7 +549,7 @@ simGeno <- function(mating.path = "",
               random.seed=random.seed,
               observe.frac= sample.frac,
               af = maf,
-              max.unobs=1, max.gen=0, #max.gen as the number extend past the current generation grp
+              max.unobs=max.unobs.layer, max.gen=0, #max.gen as the number extend past the current generation grp
               min.age=1, max.age=1, geno.err=geno.err,
               n.marr = paste0(mating.tbl$pa, "_",mating.tbl$ma) %>% unique %>% length)
 

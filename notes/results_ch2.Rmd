@@ -57,15 +57,20 @@ chinook_full_sibs_pedigree %>%
 ## simulate the two generation full sib data and run pedigraph with it
 
 simFulldata <- function(seed.num = 234,
-                        pedigraph.version = 0.181,
+                        pedigraph.version = 0.185,
                         pedigraph.path = "/Users/thomasn/repo/pedigree-factor-graphs/src",
                         outdir.path="/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib", n.iter = 10,
                         replicate.indx  = 1,
                         sf.rate = 1,
                         ped.df = chinook_full_sibs_pedigree,
                         n.snp =95, geno.err = 0.02, missing.unk = 0.005,
-                        pedfac.opt = "") {
+                        pedfac.opt = "",
+                        rerun= TRUE,
+                        pastLS = NA,
+                        run.label = "pedfac",
+                        case.label=paste0("sf_",sf.rate)) {
   
+  if (!rerun && is.na(pastLS) ) {stop("need past LS")}
   run.summary <- list()
   
   run.summary$param <- tibble::lst(seed.num, pedigraph.version, pedigraph.path, outdir.path, replicate.indx, sf.rate, n.snp, geno.err, missing.unk, pedfac.opt)
@@ -74,18 +79,35 @@ simFulldata <- function(seed.num = 234,
   mating.factor <- factor(unlist(ped.df))
   mating.lvl <- levels(mating.factor)
   mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
+  colnames(mating.factor.tbl) <- c("kid","pa","ma")
   
-  outfolder.path <- paste0(outdir.path,"/sf_",sf.rate,"/",replicate.indx)
+  outfolder.path <- paste0(outdir.path,"/",case.label,"/",replicate.indx)
   
+  pedfac.out.path <- paste0(outdir.path,"/",case.label,"/",replicate.indx,"/",run.label)
+  
+  if (rerun) {
   dir.create(file.path(outfolder.path), recursive = TRUE)
+  dir.create(file.path(pedfac.out.path), recursive = TRUE)
+  }
+  
   set.seed(seed.num)
   random.arr <- ceiling(c(runif(2,0,1e6)))
-  write.table(random.arr, paste0(outfolder.path,"/","rand"),
-              sep = " ",eol = " ",quote = FALSE, col.names = FALSE, row.names = FALSE)
   
-  colnames(mating.factor.tbl) <- c("kid","pa","ma")
-  geno.input.tbl <- simGeno(mating.tbl = mating.factor.tbl, out.path = outfolder.path,
+  
+  if (rerun) {
+    write.table(random.arr, paste0(outfolder.path,"/","rand"),
+              sep = " ",eol = " ",quote = FALSE, col.names = FALSE, row.names = FALSE)
+    
+    geno.input.tbl <- simGeno(mating.tbl = mating.factor.tbl, out.path = outfolder.path,
           n.snp =n.snp, geno.err = geno.err, random.seed = seed.num,sampling.frac.rate = sf.rate,sample.frac.gen = 1, missing.unk = missing.unk) 
+  
+  } else {
+    geno.input.tbl <- pastLS$geno.input.tbl
+  }
+  
+  run.summary$geno.input.tbl <- geno.input.tbl
+  
+  
   ## assume indiv ID is preserves
   
   
@@ -93,9 +115,22 @@ simFulldata <- function(seed.num = 234,
                          " -n ", n.iter, 
                          " -r ",outfolder.path,"/rand ", pedfac.opt, collapse = "")
   
+  if (rerun) {
   tic("run pedFac:")
   system(pedfac.call,ignore.stderr = F, ignore.stdout = F)
   runtime <- toc()
+  write.table(runtime$toc - runtime$tic, file =paste0(outfolder.path,"/",run.label,"/pedFac.time"), quote = FALSE, row.names = FALSE, col.names = FALSE)
+  run.summary$runtime <- runtime$toc - runtime$tic
+  } else {
+    #runtime <- read.table(file = paste0(outfolder.path,"/",run.label,"/pedFac.time"),stringsAsFactors = FALSE)  %>% as.numeric()
+    run.summary$runtime <- pastLS$runtime
+  }
+  
+  if (rerun) {
+  pedfac.outfile.ls <- list.files(paste0(outfolder.path,"/out"), include.dirs=TRUE, full.names = T)
+  file.copy(pedfac.outfile.ls,
+            paste0(pedfac.out.path), overwrite = T)
+  }
   
   run.summary$pedfac.cmd <- pedfac.call
   
@@ -110,39 +145,43 @@ simFulldata <- function(seed.num = 234,
     dplyr::tbl_df() %>%
     dplyr::rename("iter"="V1", "kid"="V2", "ll"="V3")
   
-  max.ll.indx <- which.max(out.ll.tbl$ll)
-  max.ll.sampled.iter <- out.ll.tbl$iter[max.ll.indx]
-  max.ll.sampled.id <- out.ll.tbl$kid[max.ll.indx]
+  run.summary$out.ll.tbl <- out.ll.tbl
   
-  max.ll.ped.indx <-  intersect(which(out.ped.raw.tbl$iter == max.ll.sampled.iter),
-                             which(out.ped.raw.tbl$kid == max.ll.sampled.id))
+  # max.ll.indx <- which.max(out.ll.tbl$ll)
+  # max.ll.sampled.iter <- out.ll.tbl$iter[max.ll.indx]
+  # max.ll.sampled.id <- out.ll.tbl$kid[max.ll.indx]
+  # 
+  # max.ll.ped.indx <-  intersect(which(out.ped.raw.tbl$iter == max.ll.sampled.iter),
+  #                            which(out.ped.raw.tbl$kid == max.ll.sampled.id))
   
-  if (max.ll.sampled.iter == 0) {
-    maxLL.ped <- out.ped.raw.tbl %>% filter(iter == max.ll.sampled.iter) %>%
-      mutate(pa = ifelse(row_number()>max.ll.ped.indx, -1, pa ),
-             ma = ifelse(row_number()>max.ll.ped.indx, -1, ma )) %>%
-      ungroup() %>%
-      select(-iter)
-  } else {
-    maxLL.ped <- out.ped.raw.tbl[1:max.ll.ped.indx,] %>%
-      filter(iter >= max.ll.sampled.iter-1) %>%
-      arrange(desc(iter)) %>%
-      group_by(kid) %>%
-      summarise(pa = pa[1],
-                ma = ma[1])
-  }
+  # if (max.ll.sampled.iter == 0) {
+  #   maxLL.ped <- out.ped.raw.tbl %>% filter(iter == max.ll.sampled.iter) %>%
+  #     mutate(pa = ifelse(row_number()>max.ll.ped.indx, -1, pa ),
+  #            ma = ifelse(row_number()>max.ll.ped.indx, -1, ma )) %>%
+  #     ungroup() %>%
+  #     select(-iter)
+  # } else {
+  #   maxLL.ped <- out.ped.raw.tbl[1:max.ll.ped.indx,] %>%
+  #     filter(iter >= max.ll.sampled.iter-1) %>%
+  #     arrange(desc(iter)) %>%
+  #     group_by(kid) %>%
+  #     summarise(pa = pa[1],
+  #               ma = ma[1])
+  # }
   
   
-  maxLL.ped.tbl <- maxLL.ped %>% ungroup() %>%
-    mutate(kid.id =  subbingID(kid, max.id, id.ls), 
-           pa.id = subbingID(pa, max.id, id.ls),
-           ma.id = subbingID(ma, max.id, id.ls))
+  # maxLL.ped.tbl <- maxLL.ped %>% group_by(kid, pa, ma) %>%
+  #   mutate(kid.id =  ifelse(kid >=0, subbingID(kid, max.id, id.ls), -1), 
+  #          pa.id = ifelse(pa >=0,subbingID(pa, max.id, id.ls), -1),
+  #          ma.id = ifelse(ma >=0, subbingID(ma, max.id, id.ls), -1))
   
   out.ped.tbl <- out.ped.raw.tbl %>%
-    dplyr::group_by(iter, kid) %>%
-    dplyr::summarise(pa = pa[dplyr::n()],
-                     ma = ma[dplyr::n()])
+    mutate(order = row_number())%>%
+    arrange(iter, desc(order))%>%
+    group_by(iter, kid)%>%
+    summarise(pa = pa[1], ma =ma[1])
   
+  run.summary$out.ped.tbl <- out.ped.tbl
   
   if (sf.rate != 0) {
     message("working out parentage inference:")
@@ -152,37 +191,37 @@ simFulldata <- function(seed.num = 234,
     parentage.grp.truth <- mating.factor.tbl %>% ungroup() %>%
       summarise(kid.id = ifelse(kid %in% observed.id.ls, kid, -1),
              pa.T = ifelse(pa %in% observed.id.ls, pa, -1),
-             ma.T = ifelse(ma %in% observed.id.ls, ma, -1))
+             ma.T = ifelse(ma %in% observed.id.ls, ma, -1))  %>%
+      filter(kid.id != -1)
     
     run.summary$parent.prob.tbl <- left_join(parentage.grp.infer, parentage.grp.truth, by=c("kid.id")) %>%
       ungroup() %>%
       mutate(n.match = (pa.id == pa.T)+(ma.id == ma.T))
     
-    run.summary$parent.maxll.tbl <- left_join(maxLL.ped.tbl %>% ungroup() %>% filter(kid.id != -1) %>% select(kid.id, pa.id, ma.id), parentage.grp.truth, by=c("kid.id")) %>%
-      ungroup() %>%
-      mutate(n.match = (pa.id == pa.T)+(ma.id == ma.T))
+    # run.summary$parent.maxll.tbl <- left_join(maxLL.ped.tbl %>% ungroup() %>% filter(kid.id != -1) %>% select(kid.id, pa.id, ma.id), parentage.grp.truth, by=c("kid.id")) %>%
+    #   ungroup() %>%
+    #   mutate(n.match = (pa.id == pa.T)+(ma.id == ma.T))
     
     
   }
   
   message("writing fullsib_assignment.txt ")
   full.sib.grp.infer <- RetrieveFullSib(out.ped.tbl, max.id, id.ls)
+  
   write.table(full.sib.grp.infer,
-              paste0(outfolder.path,"/fullsib_assignment.txt"),
+              paste0(pedfac.out.path,"/fullsib_assignment.txt"),
               sep = " ",eol = "\n",quote = FALSE, col.names = FALSE, row.names = FALSE)
   
-  full.sib.pair.maxll.tbl <- RetrieveFullSibTruth(maxLL.ped.tbl %>% ungroup() %>% filter(kid.id != -1) %>% select(kid, pa, ma)) %>% rename(presence.maxll = "presence.T")
+  #full.sib.pair.maxll.tbl <- RetrieveFullSibTruth(maxLL.ped.tbl %>% ungroup() %>% filter(kid.id != -1) %>% select(kid, pa, ma)) %>% rename(presence.maxll = "presence.T")
   
   ## perform pairwise sib-pair from the truth ped
   full.sib.pair.truth.tbl <- RetrieveFullSibTruth(mating.factor.tbl)
   ## run cluster analysis
   
-  
-  run.summary$runtime <- runtime$toc - runtime$tic
   run.summary$pairwise.tbl <- full_join(full.sib.grp.infer, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
-  run.summary$fullsib.pairwise.maxll <- full_join(full.sib.pair.maxll.tbl, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
-  run.summary$greedy.fullsib.cluster.ls <- RetrieveFullSibGrp(out.ped.tbl, mating.factor.tbl, max.id, id.ls)
-  run.summary$maxLL.fullsib.cluster.ls <- RetrieveFullSibGrp(maxLL.ped.tbl, mating.factor.tbl, max.id, id.ls,is.single.ped.entry = T)
+  #run.summary$fullsib.pairwise.maxll <- full_join(full.sib.pair.maxll.tbl, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
+  run.summary$fullsib.cluster.ls <- RetrieveFullSibGrp(out.ped.tbl, mating.factor.tbl, max.id, id.ls)
+  #run.summary$maxLL.fullsib.cluster.ls <- RetrieveFullSibGrp(maxLL.ped.tbl, mating.factor.tbl, max.id, id.ls,is.single.ped.entry = T)
   
   return(run.summary)
 }
@@ -194,7 +233,12 @@ RunSequoia <- function(seed.num = 234,
                         replicate.indx  = 1,
                         sf.rate = 1,
                         ped.df = chinook_full_sibs_pedigree,
-                        n.snp =95, geno.err = 0.02, missing.unk = 0.005) {
+                        n.snp =95, geno.err = 0.02, missing.unk = 0.005,
+                       rerun =TRUE,
+                      pastLS = NA,
+                      case.label=paste0("sf_",sf.rate)) {
+  
+  if (!rerun && is.na(pastLS) ) {stop("need past LS")}
   
   run.summary <- list()
   
@@ -207,7 +251,7 @@ RunSequoia <- function(seed.num = 234,
   mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
   colnames(mating.factor.tbl) <- c("kid","pa","ma")
   
-  outfolder.path <- paste0(outdir.path,"/sf_",sf.rate,"/",replicate.indx)
+  outfolder.path <- paste0(outdir.path,"/",case.label,"/",replicate.indx)
   pedFac.geno.tbl <- read.table(paste0(outfolder.path,"/","geno.txt"), stringsAsFactors = F) %>%
     as_tibble()
   
@@ -227,6 +271,7 @@ RunSequoia <- function(seed.num = 234,
   
   set.seed(seed.num)
   
+  if (rerun) {
   tic("run sequoia:")
   
   err.rate <- geno.err
@@ -244,26 +289,29 @@ RunSequoia <- function(seed.num = 234,
                     error.rate.2,error.rate.2,error.rate.3), ncol = 3)
   
   if (sf.rate != 0) {      
-  ParOUT_Mono <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "mono")}
+  ParOUT_Mono <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "mono", Err = geno.err)}
 
-  ParOUT_Simp <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "simp") 
+  ParOUT_Simp <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "simp", Err = geno.err) 
   SeqOUT <- sequoia(GenoM = geno.matrix,
                    SeqList = ParOUT_Simp,
                    MaxSibIter = 20, Err = geno.err, Complex = "simp")
   
   runtime <- toc()
   
-  save(ParOUT,SeqOUT, file = paste0(outfolder.path, "/sequoia_out.rds",collapse = ""))
+  save(ParOUT_Mono, ParOUT_Simp, SeqOUT, file = paste0(outfolder.path, "/sequoia_out.rds",collapse = ""))
+  
+  run.summary$runtime <- runtime$toc - runtime$tic
+  }
+   else {
+  run.summary$runtime <- pastLS$runtime
+  
+  load(paste0(outfolder.path, "/sequoia_out.rds",collapse = ""))
+   }
   
   id.ls <-readRDS(paste0(outfolder.path, "/id.rds",collapse = ""))$id
   max.id <- max(id.ls)
   
-  
-  if (sf.rate != 0) {
-    
-    message("preparing parentage assignment tbl ....")
-    
-    geno.sim.tbl <-  read.table(paste0(outfolder.path, "/ingeno.txt",collapse = ""), stringsAsFactors = FALSE)
+   geno.sim.tbl <-  read.table(paste0(outfolder.path, "/ingeno.txt",collapse = ""), stringsAsFactors = FALSE)
      
     observed.id.ls <- geno.sim.tbl$V1
     
@@ -274,8 +322,13 @@ RunSequoia <- function(seed.num = 234,
              id = kid.id) %>%
       filter(kid.id != -1)
     
+  if (sf.rate != 0) {
+    
+    message("preparing parentage assignment tbl ....")
+    
   
-    run.summary$parent.tbl <- left_join(parentage.grp.truth, ParOUT_Mono$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
+    
+    run.summary$parent.tbl <- left_join(parentage.grp.truth, SeqOUT$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
       ungroup() %>%
       rename(pa.id = "sire", ma.id = "dam") %>%
       mutate(pa.id = ifelse(is.na(pa.id), -1, as.numeric(pa.id)),
@@ -283,11 +336,19 @@ RunSequoia <- function(seed.num = 234,
              n.match = (pa.id == pa.T)+(ma.id == ma.T))
   }
   
-  sequoia.ped.1 <- inner_join(SeqOUT$Pedigree, data.frame(id=rownames(geno.matrix))) %>% as_tibble() %>%
+  
+  
+  sequoia.ped.1 <- inner_join(SeqOUT$Pedigree %>% filter(id %in% parentage.grp.truth$kid.id),
+                              data.frame(id=rownames(geno.matrix))) %>% as_tibble() %>%
     select(id, sire, dam, LLRpair) %>% ## using LLRpair as the metric of ordering
     ungroup() %>%
     mutate(sire = ifelse(is.na(sire), row_number(), sire),
-           dam = ifelse(is.na(dam), row_number(), dam))
+           dam = ifelse(is.na(dam), row_number(), dam)) %>%
+    mutate(norm.LLRpair = ifelse(is.na(LLRpair),
+                                 0,
+                                 exp(LLRpair)),
+           prob=norm.LLRpair/max(norm.LLRpair)) %>%
+    select(-LLRpair, -norm.LLRpair)
   
    sequoia.ped.2 <- 
      sequoia.ped.1 %>%
@@ -299,19 +360,22 @@ RunSequoia <- function(seed.num = 234,
     dplyr::group_by(pa, ma) %>%
     dplyr::summarise(full.sib = paste0(kid, collapse = ","),
                      n.sibs = n(),
-                     LLRpair = LLRpair[1]) %>%
+                     prob = prob[1]) %>%
     dplyr::filter(n.sibs > 1) %>%
     dplyr::ungroup() %>%
     dplyr::select(full.sib, LLRpair) 
 
 
   full.sib.grp.infer <- apply(sib.pairs,1,
-      function(x) {rbind(combn(as.numeric(unlist(strsplit(x[1],",",perl=T))),
+      function(x) {rbind(combn(as.numeric(unlist(strsplit(x[1],",",fixed=T))),
                               m=2,
                               simplify = T),x[2])}) %>%
     dplyr::bind_cols() %>%
     t %>%
-    dplyr::as_tibble() %>%
+    dplyr::as_tibble() %>% 
+    dplyr::mutate(V1 = as.numeric(V1),
+                  V2 = as.numeric(V2),
+                  V3 = as.numeric(V3)) %>%
     dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
            kid.2 = ifelse(V1<V2, V2,V1)) %>%
     dplyr::group_by(kid.1, kid.2) %>%
@@ -330,7 +394,6 @@ RunSequoia <- function(seed.num = 234,
   full.sib.pair.truth.tbl <- RetrieveFullSibTruth(mating.factor.tbl)
   ## run cluster analysis
   
-  run.summary$runtime <- runtime$toc - runtime$tic
   run.summary$pairwise.tbl <- full_join(full.sib.grp.infer, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
   run.summary$cluster.ls <- RetrieveFullSibGrpSeq(sequoia.ped.2, mating.factor.tbl, max.id, id.ls)
   return(run.summary)
@@ -348,7 +411,12 @@ RunColony <- function(seed.num = 234,
                         sf.rate = 1, ped.df = chinook_full_sibs_pedigree,
                       run.name = "colonialTrial",
                       perl.script.path = "/Users/thomasn/repo/pedigree-factor-graphs/src/SimToColony_2065.pl",
-                      colony.path = "/Users/thomasn/Downloads/colony2.mac_.20180730_1/colony2s.out") {
+                      colony.path = "/Users/thomasn/Downloads/colony2.mac_.20180730_1/colony2s.out",
+                      rerun =TRUE,
+                      pastLS = NA,
+                      case.label=paste0("sf_",sf.rate)) {
+  
+  if (!rerun && is.na(pastLS) ) {stop("need past LS")}
   
   run.summary <- list()
   
@@ -361,7 +429,7 @@ RunColony <- function(seed.num = 234,
   mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
   colnames(mating.factor.tbl) <- c("kid","pa","ma")
   
-  outfolder.path <- paste0(outdir.path,"/sf_",sf.rate,"/",replicate.indx)
+  outfolder.path <- paste0(outdir.path,"/",case.label,"/",replicate.indx)
   geno.txt.path <- paste0(outfolder.path,"/","geno.txt")
   pedFac.geno.tbl <- read.table(geno.txt.path, stringsAsFactors = F) %>%
     as_tibble()
@@ -369,22 +437,28 @@ RunColony <- function(seed.num = 234,
   set.seed(seed.num)
   
   colony.prep.cmd <- paste0("perl ", perl.script.path, " -f ", outfolder.path, " -g 0 -n ",run.name, collapse = "")
-  system(colony.prep.cmd,ignore.stderr = F, ignore.stdout = F)
   
-  dir.create(paste0(outfolder.path,"/colony"), recursive = TRUE)
-  file.copy(paste0(outfolder.path,"/colony_0.in"),
+  if (rerun) system(colony.prep.cmd,ignore.stderr = F, ignore.stdout = F)
+  
+  if (rerun) dir.create(paste0(outfolder.path,"/colony"), recursive = TRUE)
+  if (rerun) file.copy(paste0(outfolder.path,"/colony_0.in"),
             paste0(outfolder.path,"/colony/colony_0.in"), overwrite = T)
             
   colony.run.cmd <- paste0('faketime "2008-01-01 00:00:00" ', colony.path,  " IFN:",outfolder.path,"/colony_0.in >  ",outfolder.path,"/colony/colony_run.out")
   
+  if (rerun) {
   tic("run colony:")
   system(colony.run.cmd, ignore.stderr = F, ignore.stdout = F)
   runtime <- toc()
+  run.summary$runtime <- runtime$toc - runtime$tic
+  } else {
+    run.summary$runtime <- pastLS$runtime
+  }
   
   run.summary$colony.cmd <- colony.run.cmd 
   
-  colony.run.files <- list.files(".", pattern = paste0(run.name))
-  file.copy(colony.run.files, paste0(outfolder.path, "/colony/."), recursive = T, copy.date=T, overwrite = T) 
+  if (rerun)  colony.run.files <- list.files(".", pattern = paste0(run.name))
+  if (rerun)  file.copy(colony.run.files, paste0(outfolder.path, "/colony/."), recursive = T, copy.date=T, overwrite = T) 
 
   id.ls <-readRDS(paste0(outfolder.path, "/id.rds",collapse = ""))$id
   max.id <- max(id.ls)
@@ -439,11 +513,16 @@ sib.pairs.ls <- colony.cluster.tbl %>%
   map(~combn(.x, m = 2)) %>%
   map(~t(.x)) %>%
   map_dfr(as_tibble) %>%
-    dplyr::mutate(kid.1 = ifelse(V1<V2, V1,V2),
+    dplyr::mutate(
+      V1=as.numeric(V1),
+      V2=as.numeric(V2),
+      kid.1 = ifelse(V1<V2, V1,V2),
            kid.2 = ifelse(V1<V2, V2,V1)) %>%
     select(kid.1, kid.2)
   
-  full.sib.pair.infer <- left_join(sib.pairs.ls, colony.cluster.tbl %>% separate_rows(fullsib) %>% rename(kid.1 = "fullsib"), by= "kid.1")
+  full.sib.pair.infer <- left_join(sib.pairs.ls, colony.cluster.tbl %>% separate_rows(fullsib) %>% rename(kid.1 = "fullsib") %>% mutate(kid.1 = as.numeric(kid.1)), by= "kid.1") %>%
+    dplyr::mutate(kid.1 = as.character(subbingID(kid.1, max.id, id.ls)),
+                  kid.2 = as.character(subbingID(kid.2, max.id, id.ls)))
 
   
   write.table(full.sib.pair.infer,
@@ -454,7 +533,6 @@ sib.pairs.ls <- colony.cluster.tbl %>%
   full.sib.pair.truth.tbl <- RetrieveFullSibTruth(mating.factor.tbl)
   ## run cluster analysis
   
-  run.summary$runtime <- runtime$toc - runtime$tic
   run.summary$pairwise.tbl <- full_join(full.sib.pair.infer, full.sib.pair.truth.tbl, by= c("kid.1", "kid.2"))
   run.summary$cluster.ls <- RetrieveFullSibGrpCOLONY(colony.cluster.tbl, mating.factor.tbl, max.id, id.ls)
   return(run.summary)
@@ -468,13 +546,40 @@ this block is going to
 sf.array <- c(1, 0.75, 0.5, 0.25, 0)
 seed.num <- c(234, 334, 434, 534, 634)
 
-fullsib.pedfac <- lapply(1:5, function(sf) {
+fullsib.pedfac_w_swap <- lapply(1:5, function(sf) {
    lapply(1:5, function (rep) {
-    simFulldata(replicate.indx = rep, pedigraph.version = 0.181, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf])
+    simFulldata(replicate.indx = rep, pedigraph.version = 0.182, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf])
   })
 })
 
-save(fullsib.pedfac, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_full.Rda")
+#save(fullsib.pedfac_w_swap, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_w_swap.Rda")
+
+fullsib.pedfac_w_swap_sub <- lapply(1:5, function(sf) {
+   lapply(1:5, function (rep) {
+    simFulldata(replicate.indx = rep, pedigraph.version = 0.185, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.label=paste0("swap_sub_sf_",sf,"_",rep))
+  })
+})
+
+##rerun some post postprocess 
+
+
+fullsib.pedfac_w_swap_sub.rerun <- lapply(1:5, function(sf) {
+   lapply(1:5, function (rep) {
+    simFulldata(replicate.indx = rep, pedigraph.version = 0.185, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.label=paste0("swap_sub_sf_",sf,"_",rep),rerun = FALSE, pastLS = fullsib.pedfac_w_swap_sub[[sf]][[rep]])
+  })
+})
+
+
+save(fullsib.pedfac_w_swap_sub.rerun, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_w_swap_sub.rerun.Rda")
+
+fullsib.pedfac_5 <- lapply(5, function(sf) {
+   lapply(1:5, function (rep) {
+    simFulldata(replicate.indx = rep, pedigraph.version = 0.184, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.label=paste0("plain_",sf,"_",rep))
+  })
+})
+
+save(fullsib.pedfac_5, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_5.Rda")
+
 
 ##compare this with Sequoia, COLONY and Franz
 
@@ -486,26 +591,77 @@ fullsib.sequoia <- lapply(1:5, function(sf) {
 
 save(fullsib.sequoia, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/sequoia_full.Rda")
 
+
 fullsib.COLONY <- lapply(1:5, function(sf) {
    lapply(1:5, function (rep) {
     RunColony(replicate.indx = rep, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.name=paste0("sf",sf.array[sf],"r",rep))
   })
 })
 
-save(fullsib.COLONY, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/COLONY_full.Rda")
+#save(fullsib.COLONY, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/COLONY_full.Rda")
 
+
+fullsib.sequoia.rerun <- lapply(1:5, function(sf) {
+   lapply(1:5, function (rep) {
+     message("sf ",sf, "rep ", rep)
+    RunSequoia(replicate.indx = rep, seed.num = seed.num[rep], sf.rate = sf.array[sf], rerun=FALSE, pastLS = fullsib.sequoia[[sf]][[rep]])
+  })
+})
+
+save(fullsib.sequoia.rerun, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/sequoia_full.rerun.Rda")
+
+
+
+fullsib.COLONY.rerun <- lapply(1:5, function(sf) {
+   lapply(1:5, function (rep) {
+    RunColony(replicate.indx = rep, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.name=paste0("sf",sf.array[sf],"r",rep), pastLS = fullsib.COLONY[[sf]][[rep]], rerun = FALSE)
+  })
+})
+
+save(fullsib.COLONY.rerun, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/COLONY_full.rerun.Rda")
+
+
+
+#save(full.sib.pair.truth.tbl, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/full.sib.pair.truth.tbl.Rda")
 ```
 
+#### setting up for assignment plot
+
 ```{r}
+load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/COLONY_full.Rda")
+load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/sequoia_full.Rda")
+load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_full.Rda")
+
+
 
 sf.array <- c(1, 0.75, 0.5, 0.25, 0)
+rep.array <- c(1:5)
+
+X=c(1:4), Y=c(1:5))
+
 ###parentage assignment plot ROC (from 1 to 0.25),
 
-map(.x = c(1:4), .f = function(x) {
-fullsib.pedfac[[x]][[1]]$parent.prob.tbl
-fullsib.COLONY[[x]][[1]]$parent.tbl
-fullsib.sequoia[[x]][[1]]$parent.tbl
-})
+all.parentage.tbl <- expand.grid(sf.indx=c(1:4), rep.indx=c(1:5)) %>% as.tibble() %>% mutate(df.result =  map2(.x= sf.indx, .y=rep.indx, .f = function(x,y) {
+  pedfac.tem <- fullsib.pedfac[[x]][[y]]$parent.prob.tbl %>% arrange(desc(prob)) %>%
+      group_by(kid.id) %>% slice_head(n=1) %>% rename(num.correct.calls = "n.match") %>%
+      mutate(pa.id = as.numeric(pa.id), ma.id = as.numeric(ma.id),
+             prog.name = "pedFac", n.obs.parents = (pa.T!=-1) +(ma.T!=-1)) %>% ungroup()
+  COLONY.tem <- fullsib.COLONY[[x]][[y]]$parent.tbl %>% arrange(desc(prob)) %>%
+      group_by(kid.id) %>% slice_head(n=1) %>% rename(num.correct.calls = "n.match") %>%
+      mutate(prog.name = "COLONY", n.obs.parents = (pa.T!=-1) +(ma.T!=-1)) %>%
+    select(-id) %>% ungroup()
+  sequoia.tem <- fullsib.sequoia[[x]][[y]]$parent.tbl %>% ungroup() %>%
+      mutate(norm.LLRpair = ifelse(is.na(LLRpair),0, exp(LLRpair)),
+             prob=norm.LLRpair/max(norm.LLRpair)) %>%
+      arrange(desc(prob)) %>% group_by(kid.id) %>% slice_head(n=1) %>%
+      rename(num.correct.calls = "n.match") %>%
+      mutate(prog.name = "sequoia", n.obs.parents = (pa.T!=-1) +(ma.T!=-1)) %>%
+      select(-id, -norm.LLRpair, -LLRpair) %>% ungroup()
+  
+  bind_rows(pedfac.tem, COLONY.tem, sequoia.tem)
+}))
+
+all.unnested.parentage.tbl <- all.parentage.tbl %>% unnest(cols = df.result)
 
 
 ## creating plots with sf = 1, 0.5, 0 (top - bottom) - of 1 replicate
@@ -718,3 +874,168 @@ saveRDS(geno.join.tbl %>% dplyr::select(id) %>% dplyr::ungroup() %>% dplyr::muta
 
 ```
 
+
+###Verifying sequoia's functionality
+
+Double check whether the manipulation I put on sequoia is error-free. A way to check it is simulate 300 marker with all the parents avail. I presume that it should get most of the assignment right on
+
+```{r}
+seed.num = 234
+outdir.path="/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib"
+replicate.indx  = 1
+sf.rate = 1
+ped.df = chinook_full_sibs_pedigree
+n.snp =400; geno.err = 0.02; missing.unk = 0.005
+
+seq.check.summary <- list()
+
+  ## factorize ped.df
+  mating.factor <- factor(unlist(ped.df))
+  mating.lvl <- levels(mating.factor)
+  mating.factor.tbl <- matrix(as.numeric(mating.factor), ncol=3) %>% as.tibble()
+  colnames(mating.factor.tbl) <- c("kid","pa","ma")
+  
+  outfolder.path <- paste0(outdir.path,"/sequoia_chk")
+  dir.create(file.path(outfolder.path), recursive = TRUE)
+  set.seed(234)
+  
+  geno.input.tbl <- simGeno(mating.tbl = mating.factor.tbl, out.path = outfolder.path,
+          n.snp =n.snp, geno.err = geno.err, random.seed = seed.num, sampling.frac.rate = sf.rate, sample.frac.gen = 1, missing.unk = missing.unk) 
+  
+  pedFac.geno.tbl <- read.table(paste0(outfolder.path,"/","geno.txt"), stringsAsFactors = F) %>%
+    as_tibble()
+  
+  lifeHistory.tbl <- pedFac.geno.tbl %>%
+    group_by(V1) %>%
+    summarise(ID = V1,
+           Sex = as.integer(3-V3),
+           BirthYear = V4) %>%
+    ungroup() %>%
+    select(ID, Sex, BirthYear) %>% data.frame()
+  
+  geno.matrix <- pedFac.geno.tbl %>% ungroup() %>% select(-V1, -V2, -V3, -V4, -V5) %>%
+    as.matrix
+  
+  geno.matrix[geno.matrix == 3] <- -9
+  rownames(geno.matrix) <- lifeHistory.tbl$ID
+  
+  set.seed(seed.num)
+  
+  # tic("run sequoia:")
+  # 
+  # err.rate <- geno.err
+  # error.rate.0 <- 1-(err.rate)-(err.rate/2)^2
+  # error.rate.1 <- (err.rate/2)^2
+  # error.rate.2 <- err.rate /2
+  # error.rate.3 <- 1-err.rate
+
+  #ErrM <<- matrix(c(error.rate.0,err.rate,error.rate.1,
+   #       error.rate.2, 1-err.rate, error.rate.2,
+    #      error.rate.1,err.rate,error.rate.0), ncol = 3)
+  
+  # ErrM <<- matrix(c(error.rate.3,error.rate.2,error.rate.2,
+  #                   error.rate.2, error.rate.3,error.rate.2,
+  #                   error.rate.2,error.rate.2,error.rate.3), ncol = 3)
+  
+  ParOUT_Mono <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "mono", Err = geno.err)
+
+  ParOUT_Simp <- sequoia(GenoM = as.matrix(geno.matrix), LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "simp") 
+  SeqOUT <- sequoia(GenoM = geno.matrix,
+                   SeqList = ParOUT_Simp,
+                   MaxSibIter = 20, Err = geno.err, Complex = "simp")
+  
+  
+  save(ParOUT_Mono, ParOUT_Simp,SeqOUT, file = paste0(outfolder.path, "/sequoia_out.rds",collapse = ""))
+  
+  id.ls <-readRDS(paste0(outfolder.path, "/id.rds",collapse = ""))$id
+  max.id <- max(id.ls)
+  
+  
+    
+    message("preparing parentage assignment tbl ....")
+    
+    geno.sim.tbl <-  read.table(paste0(outfolder.path, "/ingeno.txt",collapse = ""), stringsAsFactors = FALSE)
+     
+    observed.id.ls <- geno.sim.tbl$V1
+    
+    parentage.grp.truth <- mating.factor.tbl %>% ungroup() %>%
+      summarise(kid.id = ifelse(kid %in% observed.id.ls, kid, -1),
+             pa.T = ifelse(pa %in% observed.id.ls, pa, -1),
+             ma.T = ifelse(ma %in% observed.id.ls, ma, -1),
+             id = kid.id) %>%
+      filter(kid.id != -1)
+    
+  
+    left_join(parentage.grp.truth, ParOUT_Mono$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
+      ungroup() %>%
+      rename(pa.id = "sire", ma.id = "dam") %>%
+      mutate(pa.id = ifelse(is.na(pa.id), -1, as.numeric(pa.id)),
+             ma.id = ifelse(is.na(ma.id), -1, as.numeric(ma.id)),
+             n.match = (pa.id == pa.T)+(ma.id == ma.T)) %>% count(n.match)
+```
+
+```{r}
+  
+  
+  ##not great let me use their simGeno
+
+    sequoia.Ped <- mating.factor.tbl %>%
+      rename(id = kid, sire = pa, dam = ma) %>%
+      select(id, dam, sire)
+    
+    sequoia.Ped.compl <- rbind(
+    cbind(id=unique(sequoia.Ped$dam), dam=NA, sire=NA),
+    cbind(id=unique(sequoia.Ped$sire), dam=NA, sire=NA),
+    sequoia.Ped)
+    
+    
+    seq.Geno <- SimGeno(Ped = data.frame(sequoia.Ped), nSnp = 300, SnpError=0.02, ParMis= 0)
+      
+    ParOUT_Mono <- sequoia(GenoM = seq.Geno, LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "mono")
+    
+    left_join(parentage.grp.truth, ParOUT_Mono$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
+      ungroup() %>%
+      rename(pa.id = "sire", ma.id = "dam") %>%
+      mutate(pa.id = ifelse(is.na(pa.id), -1, as.numeric(pa.id)),
+             ma.id = ifelse(is.na(ma.id), -1, as.numeric(ma.id)),
+             n.match = (pa.id == pa.T)+(ma.id == ma.T)) %>% count(n.match)
+    
+```
+
+# A tibble: 3 x 2
+  n.match     n
+    <int> <int>
+1       0   230
+2       1   647
+3       2   280
+
+```{r}
+ParOUT_SIMPL <- sequoia(GenoM = seq.Geno, LifeHistData = lifeHistory.tbl, MaxSibIter = 10,Complex = "simp")
+    
+    left_join(parentage.grp.truth, ParOUT_SIMPL$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
+      ungroup() %>%
+      rename(pa.id = "sire", ma.id = "dam") %>%
+      mutate(pa.id = ifelse(is.na(pa.id), -1, as.numeric(pa.id)),
+             ma.id = ifelse(is.na(ma.id), -1, as.numeric(ma.id)),
+             n.match = (pa.id == pa.T)+(ma.id == ma.T)) %>% count(n.match)
+    
+```
+
+
+```{r}
+seq.Geno <- SimGeno(Ped = data.frame(sequoia.Ped), nSnp = 200, SnpError=0.02, ParMis= 0)
+      
+ErrM <<- matrix(c(0,0,0,
+                    0, 0,0,
+                    0,0,0), ncol = 3)
+
+    ParOUT_Mono <- sequoia(GenoM = seq.Geno, LifeHistData = lifeHistory.tbl, MaxSibIter = 0,Complex = "mono", Err= 0.02)
+    
+    left_join(parentage.grp.truth, ParOUT_Mono$PedigreePar %>% as_tibble() %>% select(id, sire, dam, LLRpair) %>% ungroup() %>% mutate(id =as.numeric(id)) , by="id") %>%
+      ungroup() %>%
+      rename(pa.id = "sire", ma.id = "dam") %>%
+      mutate(pa.id = ifelse(is.na(pa.id), -1, as.numeric(pa.id)),
+             ma.id = ifelse(is.na(ma.id), -1, as.numeric(ma.id)),
+             n.match = (pa.id == pa.T)+(ma.id == ma.T)) %>% count(n.match)
+
+```

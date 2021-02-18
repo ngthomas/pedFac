@@ -187,7 +187,7 @@ simFulldata <- function(seed.num = 234,
     message("working out parentage inference:")
     parentage.grp.infer <- retrieveParent(out.ped.tbl, max.id, id.ls)
     
-    observed.id.ls <- geno.input.tbl$sorted.id
+    observed.id.ls <- geno.input.tbl$id
     parentage.grp.truth <- mating.factor.tbl %>% ungroup() %>%
       summarise(kid.id = ifelse(kid %in% observed.id.ls, kid, -1),
              pa.T = ifelse(pa %in% observed.id.ls, pa, -1),
@@ -559,6 +559,8 @@ fullsib.pedfac_w_swap_sub <- lapply(1:5, function(sf) {
     simFulldata(replicate.indx = rep, pedigraph.version = 0.185, pedfac.opt= " -j 1 -f 10", n.iter = 100, seed.num = seed.num[rep], sf.rate = sf.array[sf], run.label=paste0("swap_sub_sf_",sf,"_",rep))
   })
 })
+
+save(fullsib.pedfac_w_swap_sub, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/pedfac_w_swap_sub.Rda")
 
 ##rerun some post postprocess 
 

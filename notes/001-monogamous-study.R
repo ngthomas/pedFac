@@ -20,6 +20,8 @@ fullsib.pedfac_w_swap_sub <- fullsib.pedfac_w_swap_sub.rerun
 
 load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/full.sib.pair.truth.tbl.Rda")
 
+
+
 Longo <- expand_grid(
   samp_frac_idx = 1:5,
   rep.indx = 1:5
@@ -49,6 +51,17 @@ get_runtime_mins <- function(L) {
 fract_nmatch <- function(Tib) {
   mean(Tib$n.match)
 }
+
+
+
+  runtime.tbl <- Longo %>%
+    filter(software != "colony_med_sibprior") %>%
+    group_by(sampl.frac, rep.indx, software) %>%
+    mutate(
+      seconds = map_dbl(output, "runtime")) %>%
+    group_by(software) %>%
+    summarise(runtime = mean(seconds))
+
 
 ## making parentage assignment
 cleanOutParentTbl <- function(Tib) {
@@ -90,7 +103,7 @@ compiled.parentage.tbl <- Longo %>% filter(sampl.frac != 0) %>%
       TRUE ~ map(output, "parent.tbl")),
     parent_org_tbl_prob = map(parent_tbl_prob, cleanOutParentTbl)) %>%
   ungroup() %>%
-  select(-parent_tbl_prob, -output) %>%
+  select(-output, -parent_tbl_prob) %>%
   unnest(cols=c(parent_org_tbl_prob))
 
 parentage.stat <- compiled.parentage.tbl %>%
@@ -115,6 +128,7 @@ prob.rank.err.line3.tbl <- prob.rank.plot.tbl %>%
   filter(num.correct.calls != 2) %>%
   mutate(x=rank, xend=rank, y= prob, yend = prob-0.1*(n.miss.unobs.parent))
 
+
 prob.err.cum.sum <- prob.rank.plot.tbl %>%
   arrange(rank) %>%
   group_by(software, sampl.frac, rep.indx) %>%
@@ -128,15 +142,15 @@ parentage.prob.plot <-
   ggplot(data=prob.rank.plot.tbl %>% filter(rep.indx==i)) +
   #geom_segment(data=prob.rank.nobs.line.tbl, aes(x=x, y=y, xend=xend, yend=yend), color =
    #              "grey", alpha=0.4) +
-  geom_segment(data=prob.rank.err.line2.tbl %>% filter(rep.indx==i), aes(x=x, y=y, xend=xend, yend=yend), color ="#FF5733" ,alpha=0.8) +
-  geom_segment(data=prob.rank.err.line3.tbl %>% filter(rep.indx==i), aes(x=x, y=y, xend=xend, yend=yend),color="orange" ,alpha=0.9)+
+  geom_segment(data=prob.rank.err.line2.tbl %>% filter(rep.indx==i), aes(x=x, y=y, xend=xend, yend=yend), color ="#a45eff" ,alpha=0.8) +
+  geom_segment(data=prob.rank.err.line3.tbl %>% filter(rep.indx==i), aes(x=x, y=y, xend=xend, yend=yend),color="#a6d7ff" ,alpha=0.9)+
   geom_line(aes(x=rank, y=prob), )+
-  geom_line(data=prob.err.cum.sum %>% filter(rep.indx==i), aes(x= rank, y= y),color="#5499C7", alpha=0.9)+
+  #geom_line(data=prob.err.cum.sum %>% filter(rep.indx==i), aes(x= rank, y= y),color="#5499C7", alpha=0.9)+
     #scale_color_manual(values = c("#5499C7", "#FF5733", "orange"), labels=c("n","d","d1"))+
   facet_grid(sampl.frac~software, switch="y")+
   theme_light()+
   scale_y_continuous("Prob", position = "right", breaks=seq(0,1,0.2), minor_breaks = seq(-0.1,1.1,0.1))+
-  scale_x_continuous("Individual index (ordered by desc. prob)")+
+  scale_x_continuous("Individual index")+
     theme(#strip.placement = "outside",
     strip.background.y = element_rect(fill= "dark grey"),
     strip.background.x = element_rect(fill= "dark grey"),
@@ -145,9 +159,9 @@ parentage.prob.plot <-
 
 legend.parentage <- ggplot()+
   geom_text(aes(x=0.08, y=0.6, label= "Parent that is misassigned is:"),size=3.5, hjust="left", vjust="middle")+
-  geom_segment(aes(x=0.55, y=0.0, xend=0.55, yend=1), color ="#FF5733" ,alpha=0.8, size=0.9)+
+  geom_segment(aes(x=0.55, y=0.0, xend=0.55, yend=1), color ="#a45eff" ,alpha=0.8, size=0.9)+
   geom_text(aes(x=0.58, y=0.6, label= "observed"),size=3.5, hjust="left", vjust="middle")+
-  geom_segment(aes(x=0.75, y=0.0, xend=0.75, yend=1), color ="orange" ,alpha=0.9, size=0.9)+
+  geom_segment(aes(x=0.75, y=0.0, xend=0.75, yend=1), color ="#a6d7ff" ,alpha=0.9, size=0.9)+
   geom_text(aes(x=0.78, y=0.6, label= "unobserved"),size=3.5, hjust="left", vjust="middle")+
   scale_y_continuous("", position = "right", breaks=FALSE,limits = c(0,1),minor_breaks = NULL,labels = NULL)+
   scale_x_continuous("", limits=c(0,1))+
@@ -263,7 +277,7 @@ parentage.stat.plot.tbl <- parentage.stat.tbl %>%
   mutate(
     stat = case_when(
       stat=="AUC"~"Area Under the Curve",
-      stat=="AR"~"Assignment Rate"
+      stat=="AR"~"Precision"
     )
   )
 
@@ -277,7 +291,7 @@ g <- ggplot(data=parentage.stat.plot.tbl) +
                mutate(
                  stat = case_when(
                    stat=="AUC"~"Area Under the Curve",
-                   stat=="AR"~"Assignment Rate"
+                   stat=="AR"~"Precision"
                  )
                ), aes(y=software,x=mean), color="red", shape=124, size=4, stroke=4)+
   facet_grid(sampl.frac~stat,scales = "free_x", switch="y")+
@@ -307,14 +321,14 @@ parentage.prep.xtable <- parentage.boxstat.tbl %>% ungroup() %>%
     sampl.frac = factor(sampl.frac, labels=c(1.0,0.75,0.5, 0.25), levels = c("sf:\n1.0","sf:\n0.75","sf:\n0.5","sf:\n0.25")),
          min = round(min, 2),
     max = round(max, 2),
-         mean = round(mean, 3),
-         sd = round(sd, 3)) %>%
+         mean = round(mean, 2),
+         sd = round(sd, 2)) %>%
   pivot_wider(names_from = stat, names_glue = "{stat}_{.value}", values_from=min:sd) %>%
   arrange(sampl.frac, desc(software)) %>%
   group_by(sampl.frac, software) %>%
-  summarise("AR_mean w/ sd" = sprintf("%.3f +/- %.3f", AR_mean, AR_sd),
+  summarise("AR_mean w/ sd" = sprintf("%.2f +/- %.2f", AR_mean, AR_sd),
             "AR_range" = sprintf("(%.2f,%.2f)", AR_min, AR_max),
-            "AUC_mean w/ sd" = sprintf("%.3f +/- %.3f", AUC_mean, AUC_sd),
+            "AUC_mean w/ sd" = sprintf("%.2f +/- %.2f", AUC_mean, AUC_sd),
             "AUC_range" = sprintf("(%.2f,%.2f)", AUC_min, AUC_max)) %>%
   rename(fraction = sampl.frac)
 
@@ -324,11 +338,11 @@ column_spec(1, bold = T, width = "4em", latex_valign= "m", latex_column_spec = "
   row_spec(c(1:5, 11:15)-1, extra_latex_after = "\\rowcolor{gray!6}") %>%
   row_spec(0, align="c") %>%
   collapse_rows(1, latex_hline = "none") %>%
-  add_header_above(c(" ", " ", "Assignment Rate" = 2, "AUC" = 2),align="c", bold=T)
+  add_header_above(c(" ", " ", "Precision" = 2, "ROC-AUC" = 2),align="c", bold=T)
 
-#latex.out.1 <- gsub('(AUC\\\\_q)|(AR\\\\_q)', "0", latex.out, perl = T)
-latex.out.1 <- gsub('(AUC\\\\_)|(AR\\\\_)', "", latex.out, perl = T)
-write(latex.out.1,  "notes/table/parent_stat_table.txt")
+latex.out.1 <- gsub('\\+/-', "$\\\\pm$", latex.out, perl = T)
+latex.out.2 <- gsub('(AUC\\\\_)|(AR\\\\_)', "", latex.out.1, perl = T)
+write(latex.out.2,  "notes/table/ch2_mono_parent.tex")
 
 ### sibship pairwise analysis
 
@@ -363,7 +377,7 @@ total.n.sibs <- unique(c(compiled.sibship.pairwise.tbl$kid.1,
 # it should be 1157
 total.n.pairs <- total.n.sibs*(total.n.sibs-1)*0.5
 
-FS.infer.tbl <- bind_rows(
+FS.infer.tbl.prep <- bind_rows(
   compiled.sibship.pairwise.tbl %>% filter(software == "sequoia") %>%
   group_by(software, rep.indx, sampl.frac) %>%
   mutate(norm = ifelse(is.na(prob),0,exp(prob)),
@@ -377,14 +391,27 @@ FS.infer.tbl <- bind_rows(
          presence.T = ifelse(is.na(presence.T),0,presence.T)) %>%
   filter(!(prob == 0 & presence.T ==0))
 
+n.low.denom <- FS.infer.tbl.prep %>%
+  filter(prob>0, software != "sequoia") %>%
+  group_by(rep.indx, sampl.frac, software) %>%
+  summarise(n=n()) %>%
+  group_by(rep.indx, sampl.frac) %>%
+  summarise(cutoff = min(n))
 
-FS.infer.tbl <- bind_rows(
-  FS.infer.tbl %>% filter(software != "pedFac"),
-  FS.infer.tbl %>% filter(software == "pedFac") %>%
-    ungroup() %>%
-    mutate(prob = ifelse(prob <0.5, 0, prob)) %>%
-    filter(!(prob == 0 & presence.T ==0))
-)
+FS.infer.tbl <- left_join(FS.infer.tbl.prep, n.low.denom) %>%
+  arrange(desc(prob)) %>%
+  group_by(rep.indx, sampl.frac, software) %>%
+    mutate(prob = ifelse(row_number() > cutoff & software != "sequoia",0,prob)) %>%
+  ungroup() %>%
+  filter(!(prob == 0 & presence.T ==0))
+#
+# FS.infer.tbl <- bind_rows(
+#   FS.infer.tbl %>% filter(software != "pedFac"),
+#   FS.infer.tbl %>% filter(software == "pedFac") %>%
+#     ungroup() %>%
+#     #mutate(prob = ifelse(prob <0.5, 0, prob)) %>%
+#     filter(!(prob == 0 & presence.T ==0))
+# )
 
 
 
@@ -417,12 +444,12 @@ prob.rank.FS.tbl <- FS.infer.tbl %>%
   group_by(rep.indx, sampl.frac, software) %>%
   mutate(rank = row_number())
 
-prob.rank.FS.err.line.up <- prob.rank.FS.tbl %>%
-  filter(presence.T == 1, prob == 0) %>%
-  mutate(x=rank, xend=rank, y= prob, yend = prob+0.1)
 prob.rank.FS.err.line.down <- prob.rank.FS.tbl %>%
-  filter(presence.T == 0) %>%
+  filter(presence.T == 1, prob == 0) %>%
   mutate(x=rank, xend=rank, y= prob, yend = prob-0.1)
+prob.rank.FS.err.line.up <- prob.rank.FS.tbl %>%
+  filter(presence.T == 0) %>%
+  mutate(x=rank, xend=rank, y= prob, yend = prob+0.1)
 
 prob.rank.FS.cumsum <- prob.rank.FS.tbl %>%
   arrange(rank) %>%
@@ -450,10 +477,10 @@ for (i in 1:5) {
       panel.grid.minor.y = element_blank())
 
   legend.FS <- ggplot()+
-    geom_segment(aes(x=0.05, y=0.0, xend=0.05, yend=1), color ="#FF5733" ,alpha=0.8, size=0.9)+
-    geom_text(aes(x=0.08, y=0.6, label= "Missing True Assignment"),size=3.5, hjust="left", vjust="middle")+
-    geom_segment(aes(x=0.65, y=0.0, xend=0.65, yend=1), color ="orange" ,alpha=0.9, size=0.9)+
-    geom_text(aes(x=0.68, y=0.6, label= "False FS Assignment"),size=3.5, hjust="left", vjust="middle")+
+    geom_segment(aes(x=0.65, y=0.0, xend=0.65, yend=1), color ="orange" ,alpha=0.8, size=0.9)+
+    geom_text(aes(x=0.68, y=0.6, label= "Missing True Assignment"),size=3.5, hjust="left", vjust="middle")+
+    geom_segment(aes(x=0.05, y=0.0, xend=0.05, yend=1), color ="#FF5733" ,alpha=0.9, size=0.9)+
+    geom_text(aes(x=0.08, y=0.6, label= "False FS Assignment"),size=3.5, hjust="left", vjust="middle")+
     scale_y_continuous("", position = "right", breaks=FALSE,limits = c(0,1),minor_breaks = NULL,labels = NULL)+
     scale_x_continuous("", limits=c(0,1))+
     theme(#strip.placement = "outside",
@@ -660,25 +687,36 @@ FS.ROC.ggplot <- ggplot(roc.FS.compiled.df %>% arrange(fpr, tpr), aes(x = fpr, y
   ggsave(paste0("notes/fig/ch2_fullsib_SibPair_ROCplot.png"), FS.ROC.ggplot,  device="png", height=5, width=9, units="in", dpi=500)
 
 
+  FS.runtime.stat.tbl <-  Longo %>%
+    filter(!software %in% c("pedFac_plain", "pedFac_w_swap", "colony_med_sibprior")) %>%
+    mutate(software = factor(software, levels=c("pedFac_w_swap_sub",  "colony_no_sibprior", "sequoia"), labels = c("pedFac",  "COLONY", "sequoia") %>% as.character),
+      run.time = map_dbl(output, "runtime")) %>%
+    group_by(software, rep.indx, sampl.frac) %>%
+    summarise (
+      stat = "runtime",
+      score = run.time)
 
 
-FS.AUC.stat.tbl <- FS.infer.tbl %>%
+FS.AUC.stat.tbl <- prob.rank.FS.tbl.1 %>%
+  mutate(sampl.frac = c(1,0.75,0.5, 0.25,0)[as.numeric(sampl.frac)]) %>%
   arrange(desc(prob)) %>%
   group_by(software, rep.indx, sampl.frac) %>%
   summarise (
     stat = "AUC",
     score = Calculate.FS.AUC(prob, presence.T))
 
-FS.FDR.stat.tbl <- FS.infer.tbl %>% ungroup() %>%
-  mutate(threshold = ifelse(software=="pedFac", 0.5, 0)) %>%
-  filter(prob> threshold) %>%
+FS.FDR.stat.tbl <- prob.rank.FS.tbl %>%
+  mutate(sampl.frac = c(1,0.75,0.5, 0.25,0)[as.numeric(sampl.frac)]) %>%
+  ungroup() %>%
+  filter(prob> 0) %>%
   arrange(desc(prob)) %>%
   group_by(software, rep.indx, sampl.frac) %>%
   summarise (
     stat = "FDR",
     score = sum(presence.T==0)/n())
 
-FS.FNR.stat.tbl <- FS.infer.tbl %>% filter(presence.T ==1) %>%
+FS.FNR.stat.tbl <- prob.rank.FS.tbl %>% filter(presence.T ==1) %>%
+  mutate(sampl.frac = c(1,0.75,0.5, 0.25,0)[as.numeric(sampl.frac)]) %>%
   arrange(desc(prob)) %>%
   group_by(software, rep.indx, sampl.frac) %>%
   summarise (
@@ -694,7 +732,8 @@ FS.FNR.stat.tbl <- FS.infer.tbl %>% filter(presence.T ==1) %>%
 
 FS.prep.xtable <- bind_rows(FS.AUC.stat.tbl,
                             FS.FDR.stat.tbl,
-                            FS.FNR.stat.tbl) %>%
+                            FS.FNR.stat.tbl,
+                            FS.runtime.stat.tbl) %>%
   mutate(software = factor(software, levels=c("pedFac",  "COLONY", "sequoia"))) %>%
   group_by(sampl.frac, software, stat) %>%
   summarise(
@@ -710,22 +749,23 @@ FS.prep.xtable <- bind_rows(FS.AUC.stat.tbl,
             "FNR_mean w/ sd" = sprintf("%.4f +/- %.4f", FNR_mean, FNR_sd),
             "FNR_range" = sprintf("(%.3f,%.3f)", FNR_min, FNR_max),
             "AUC_mean w/ sd" = sprintf("%.3f +/- %.3f", AUC_mean, AUC_sd),
-            "AUC_range" = sprintf("(%.2f,%.2f)", AUC_min, AUC_max)) %>%
+            "AUC_range" = sprintf("(%.2f,%.2f)", AUC_min, AUC_max),
+            "mean w/ sd" = sprintf("%.f +/- %.f", runtime_mean, runtime_sd)) %>%
   arrange(desc(sampl.frac), software) %>%
   rename(fraction = sampl.frac)
 #as.character(signif(FDR_mean,3))
 
 latex.out <- kbl(FS.prep.xtable, booktabs = T, "latex") %>%
-  column_spec(1, bold = T, width = "5em", latex_valign= "m") %>%
+  column_spec(1, bold = T, width = "3.5em", latex_valign= "m") %>%
   row_spec(c(1:3, 7:9, 13:15)-1, extra_latex_after = "\\rowcolor{gray!6}") %>%
   collapse_rows(1, latex_hline = "none") %>%
   row_spec(0, align="c") %>%
-  add_header_above(c(" ", " ", "FDR" = 2, "FNR" = 2,"AUC" = 2), align="c", bold=T) %>%
-  landscape()
+  add_header_above(c(" ", " ", "FDR" = 2, "FNR" = 2,"ROC-AUC" = 2, "Runtime (sec)" = 1), align="c", bold=T)
 
-#latex.out.1 <- gsub('(AUC\\\\_q)|(AR\\\\_q)', "0", latex.out, perl = T)
-latex.out.2 <- gsub('(AUC\\\\_)|(FDR\\\\_)|(FNR\\\\_)', "", latex.out, perl = T)
-write(latex.out.2, "notes/table/FSpairTable1.txt")
+latex.out.1 <- gsub('\\+/-', "$\\\\pm$", latex.out, perl = T)
+latex.out.2 <- gsub('(AUC\\\\_)|(FDR\\\\_)|(FNR\\\\_)', "", latex.out.1, perl = T)
+write(latex.out.2, "notes/table/ch2_mono_FSpair.tex")
+
 
 
 ## pairwise Table
@@ -867,16 +907,16 @@ infer.sib.grp.ggplot = list()
 for (i in 1:5) {
 
   y.limit <- infer.cluster.compiled.1 %>%  filter(rep.indx == i) %>%
-    summarise(min.y = min(prob-n.excess*0.1),
-              max.y = max(prob+n.missing*0.1))
+    summarise(max.y = max(prob+n.excess*0.1),
+              min.y = min(prob-n.missing*0.1))
 
   infer.sib.group.plot <-
     ggplot(data= infer.cluster.compiled.1 %>%  filter(rep.indx == i))+
-    geom_segment(aes(x=index.n, xend=index.n, y=prob, yend=prob-n.excess*0.1), color ="#FF5733" ,alpha=0.9)+
-    geom_segment(aes(x=index.n, xend=index.n, y=prob, yend=prob+n.missing*0.1), color="orange" ,alpha=0.9)+
+    geom_segment(aes(x=index.n, xend=index.n, y=prob, yend=prob+n.excess*0.1), color ="#FF5733" ,alpha=0.9)+
+    geom_segment(aes(x=index.n, xend=index.n, y=prob, yend=prob-n.missing*0.1), color="orange" ,alpha=0.9)+
     geom_rug(aes(x=index.n, color = n.sib.truth.category))+
-    scale_color_manual("True Sibship Size",values=colorBrewer2_scale)+
-    guides(colour = guide_legend(nrow = 1, reverse=T))+
+    scale_color_manual("True Sibship Size",values=colorBrewer2_scale, limits= c("11 - 6","5","4","3","2","1"))+
+    guides(colour = guide_legend(nrow = 1))+
     geom_line(aes(x=index.n, y=prob))+
     facet_grid(sampl.frac~software, switch="y", scale="free_x")+
     scale_y_continuous(
@@ -993,12 +1033,11 @@ cluster.latex.out <- kbl(FS.cluster.prep.xtable, booktabs = T, "latex") %>%
   row_spec(c(1:3, 7:9, 13:15)-1, extra_latex_after = "\\rowcolor{gray!6}") %>%
   collapse_rows(1, latex_hline = "none") %>%
   row_spec(0, align="c") %>%
-  add_header_above(c(" ", " ", "FDR" = 2, "FNR" = 2,"AUC" = 2), align="c", bold=T) %>%
-  landscape()
+  add_header_above(c(" ", " ", "FDR" = 2, "FNR" = 2,"ROC-AUC" = 2), align="c", bold=T)
 
-#latex.out.1 <- gsub('(AUC\\\\_q)|(AR\\\\_q)', "0", latex.out, perl = T)
-cluster.latex.out.2 <- gsub('(AUC\\\\_)|(FDR\\\\_)|(FNR\\\\_)', "", cluster.latex.out, perl = T)
-write(cluster.latex.out.2, "notes/table/FS.cluster.Table.txt")
+cluster.latex.out.1 <- gsub('\\+/-', "$\\\\pm$", cluster.latex.out, perl = T)
+cluster.latex.out.2 <- gsub('(AUC\\\\_)|(FDR\\\\_)|(FNR\\\\_)', "", cluster.latex.out.1, perl = T)
+write(cluster.latex.out.2, "notes/table/ch2_mono_FSgrp.tex")
 
 
 

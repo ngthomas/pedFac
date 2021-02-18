@@ -203,7 +203,7 @@ Sim.and.RunPedFac <- function(seed.num = 234,
     message("working out parentage inference:")
     parentage.grp.infer <- retrieveParent(out.ped.tbl, max.id, id.ls)
 
-    observed.id.ls <- geno.input.tbl$sorted.id
+    observed.id.ls <- geno.input.tbl$id
     parentage.grp.truth <- mating.factor.tbl %>% ungroup() %>%
       summarise(kid.id = ifelse(kid %in% observed.id.ls, kid, -1),
                 pa.T = ifelse(pa %in% observed.id.ls, pa, -1),
@@ -647,6 +647,19 @@ alpha.weight.missing.loci.array <- c(0.5,0.1); beta.weight.missing.loci.array <-
 #alpha.weight.missing.loci = 0.1; beta.weight.missing.loci = 10;
 
 
+halfsib.sf.0.assign.1.pedfac <- lapply(1:5, function(sf) {
+  lapply(1:5, function (rep) {
+    Sim.and.RunPedFac(replicate.indx = rep,
+                      n.iter = 100,
+                      seed.num = seed.array[rep],
+                      sf.rate = sf.array[sf],
+                      case.label = paste0("sf_",sf.array[sf]),
+                      pedfac.opt = "-f 10 -a 1"
+                      )
+  })
+})
+
+
 halfsib.sf.pedfac <- lapply(1:5, function(sf) {
   lapply(1:5, function (rep) {
     Sim.and.RunPedFac(replicate.indx = rep,
@@ -784,12 +797,12 @@ halfsib.sf.COLONY.rerun <- lapply(1:5, function(sf) {
               colony.label = paste0("sf_",sf.array[sf]),
               case.label = paste0("sf_",sf.array[sf]),
               rerun = FALSE,
-              pastLS = halfsib.sf.COLONY
+              pastLS = halfsib.sf.COLONY[[sf]][[rep]]
               )
   })
 })
 
-save(halfsib.sf.COLONY.rerun, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.COLONY.rerun")
+#save(halfsib.sf.COLONY.rerun, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.COLONY.rerun")
 
 
 

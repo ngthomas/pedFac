@@ -15,7 +15,7 @@ library(xtable)
 library(kableExtra)
 library(gridExtra)
 
-load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.pedfac")
+load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.pedfac.186v")
 load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.COLONY.rerun")
 load("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.sequoia.rerun")
 
@@ -27,7 +27,7 @@ Longo <- expand_grid(
     sampl.frac = c(1, 0.75, 0.5, 0.25, 0)[samp_frac_idx],
     COLONY = map2(.x = samp_frac_idx, .y = rep.indx, .f = function(x, y) halfsib.sf.COLONY.rerun[[x]][[y]]),
     sequoia = map2(.x = samp_frac_idx, .y = rep.indx, .f = function(x, y) halfsib.sf.sequoia.rerun[[x]][[y]]),
-    pedFac = map2(.x = samp_frac_idx, .y = rep.indx, .f = function(x, y) halfsib.sf.pedfac[[x]][[y]])
+    pedFac = map2(.x = samp_frac_idx, .y = rep.indx, .f = function(x, y) halfsib.sf.pedfac.187v[[x]][[y]])
   ) %>%
   pivot_longer(
     cols = COLONY:pedFac,
@@ -684,11 +684,11 @@ FS.ROC.ggplot <- ggplot(roc.FS.compiled.df %>% arrange(fpr, tpr), aes(x = fpr, y
   ggsave(paste0("notes/fig/ch2_poly_",sib.label,"Pair_ROCplot.png"), FS.ROC.ggplot,  device="png", height=5, width=9, units="in", dpi=500)
 
 FS.runtime.stat.tbl <-  Longo %>%
-    mutate(run.time = map_dbl(output, "runtime")) %>%
+    mutate(run.time = map(output, "runtime")) %>%
     group_by(software, rep.indx, sampl.frac) %>%
     summarise (
       stat = "runtime",
-      score = run.time)
+      score = as.numeric(run.time[1]))
 
 
 
@@ -1071,4 +1071,81 @@ cluster.latex.out <- kbl(FS.cluster.prep.xtable, booktabs = T, "latex") %>%
 cluster.latex.out.1 <- gsub('\\+/-', "$\\\\pm$", cluster.latex.out, perl = T)
 cluster.latex.out.2 <- gsub('(AUC\\\\_)|(FDR\\\\_)|(FNR\\\\_)', "", cluster.latex.out.1, perl = T)
 write(cluster.latex.out.2, "notes/table/ch2_poly_FSgrp.tex")
+
+
+
+
+##### LL chart
+
+
+poly.ll.tbl <- expand_grid(
+  samp_frac_idx = 1:5,
+  rep.indx = 1:5
+) %>%
+  mutate(
+    sampl.frac = c(1, 0.75, 0.5, 0.25, 0)[samp_frac_idx],
+    ll = map2(.x = sampl.frac, .y = rep.indx, .f = function(x, y) {
+      read.table(paste0("/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/halfSib/sf_",x,"/",y,"/pedfac/ll.txt")) %>%
+        tibble() %>%
+        mutate(rank = row_number())
+      })) %>%
+  unnest(cols=c(ll)) %>%
+  group_by(samp_frac_idx, rep.indx, V1) %>%
+  mutate(first.tick = ifelse(rank == min(rank), 1, 0)) %>%
+  ungroup()
+
+
+ggplot(poly.ll.tbl) +
+  geom_line(aes(x=rank, y=V3, color = factor(sampl.frac), linetype = factor(rep.indx))) +
+  geom_segment(data = poly.ll.tbl %>% filter(first.tick ==1), aes(y=V3-(400-(V1+1)*4), yend=V3+(400-(V1+1)*4), x=rank, xend=rank, alpha = 1/(V1+1)), color ="black") +
+  geom_text(data = poly.ll.tbl %>%
+              filter(first.tick ==1, V1==0) %>%
+              group_by(sampl.frac) %>%
+              summarise(min.post = min(V3)),
+            aes(x=1.3, y=min.post-1000, label=paste0("sf: ",sampl.frac), color = factor(sampl.frac)), hjust="left")+
+  scale_x_log10()+
+  xlab("iterations")+
+  ylab("log posterior")+
+  scale_linetype_discrete(guide=FALSE)+
+  scale_color_discrete(guide=FALSE)+
+  scale_alpha_continuous(guide=FALSE)+
+  theme_light()+
+  annotation_logticks()+
+  theme(
+    legend.position="bottom",
+  )
+
+
+###
+
+poly.ll.plot <- ggplot(poly.ll.tbl %>% filter(V1>0)) +
+  geom_line(aes(x=rank, y=V3, color = factor(sampl.frac), linetype = factor(rep.indx))) +
+  geom_segment(data = poly.ll.tbl %>% filter(first.tick ==1, V1>0), aes(y=V3-(400-(V1+1)*4), yend=V3+(400-(V1+1)*4), x=rank, xend=rank, alpha = 1/(V1+1)), color ="black") +
+  geom_text(data = poly.ll.tbl %>%
+              filter(first.tick ==1, V1==1) %>%
+              group_by(sampl.frac) %>%
+              summarise(min.post = min(V3),
+                        min.iter = min(rank)),
+            aes(x=min.iter, y=min.post-800, label=paste0("sf: ",sampl.frac), color = factor(sampl.frac)), hjust="left")+
+  geom_text(data = poly.ll.tbl %>%
+              filter(first.tick ==1, V1 %in% c(1,2,3,5,10,25,50), sampl.frac == 0) %>%
+              group_by(sampl.frac, V1) %>%
+              summarise(max.post = max(V3),
+                        min.iter = min(rank)),
+            aes(x=min.iter, y=max.post+1000, label=V1))+
+  scale_x_log10()+
+  xlab("iterations")+
+  ylab("log posterior")+
+  scale_linetype_discrete(guide=FALSE)+
+  scale_color_discrete(guide=FALSE)+
+  scale_alpha_continuous(guide=FALSE)+
+  theme_light()+
+  annotation_logticks()+
+  theme(
+    legend.position="bottom",
+  )
+
+ggsave(paste0("notes/fig/ch2_poly_ll.pdf"), poly.ll.plot, device="pdf", height=5, width=9, units="in", dpi=500)
+
+ggsave(paste0("notes/fig/ch2_poly_ll.png"), poly.ll.plot,  device="png", height=5, width=9, units="in", dpi=500)
 

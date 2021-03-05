@@ -108,7 +108,7 @@ Sim.and.RunPedFac <- function(seed.num = 234,
                         run.label = "pedfac",
                         case.label = "sf_0.75") {
 
-  if (!rerun && is.na(pastLS) ) {stop("need past LS")}
+ # if (!rerun && is.na(pastLS) ) {stop("need past LS")}
 
   run.summary <- list()
 
@@ -148,7 +148,7 @@ Sim.and.RunPedFac <- function(seed.num = 234,
                             alpha.weight.missing.loci = alpha.weight.missing.loci,
                             beta.weight.missing.loci = beta.weight.missing.loci)
   } else {
-    geno.input.tbl <- pastLS$geno.input.tbl
+    #geno.input.tbl <- pastLS$geno.input.tbl
   }
 
   run.summary$geno.input.tbl <- geno.input.tbl
@@ -159,6 +159,8 @@ Sim.and.RunPedFac <- function(seed.num = 234,
                         " -n ", n.iter,
                         " -r ",outfolder.path,"/rand ", pedfac.opt, collapse = "")
 
+  print(pedfac.call)
+
   if (rerun) {
     tic("run pedFac:")
     system(pedfac.call,ignore.stderr = F, ignore.stdout = F)
@@ -166,7 +168,7 @@ Sim.and.RunPedFac <- function(seed.num = 234,
     write.table(runtime$toc - runtime$tic, file =paste0(outfolder.path,"/",run.label,"/pedFac.time"), quote = FALSE, row.names = FALSE, col.names = FALSE)
     run.summary$runtime <- runtime$toc - runtime$tic
   } else {
-    run.summary$runtime <- pastLS$runtime
+    run.summary$runtime <- read.table(file =paste0(outfolder.path,"/",run.label,"/pedFac.time")) %>% as.numeric()
   }
 
   if (rerun) {
@@ -198,12 +200,14 @@ Sim.and.RunPedFac <- function(seed.num = 234,
 
   run.summary$out.ped.tbl <- out.ped.tbl
 
+  geno.sim.tbl <-  read.table(paste0(outfolder.path, "/ingeno.txt",collapse = ""), stringsAsFactors = FALSE)
+
 
   if (sf.rate != 0) {
     message("working out parentage inference:")
     parentage.grp.infer <- retrieveParent(out.ped.tbl, max.id, id.ls)
 
-    observed.id.ls <- geno.input.tbl$id
+    observed.id.ls <- geno.sim.tbl$V1
     parentage.grp.truth <- mating.factor.tbl %>% ungroup() %>%
       summarise(kid.id = ifelse(kid %in% observed.id.ls, kid, -1),
                 pa.T = ifelse(pa %in% observed.id.ls, pa, -1),
@@ -671,6 +675,27 @@ halfsib.sf.pedfac <- lapply(1:5, function(sf) {
 })
 
 #save(halfsib.sf.pedfac, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.pedfac")
+
+
+
+### version with ab initio with nada
+
+
+
+halfsib.sf.pedfac.187v <- lapply(1:5, function(sf) {
+  lapply(1:5, function (rep) {
+    Sim.and.RunPedFac(replicate.indx = rep,
+                      pedigraph.version = 0.187,
+                      n.iter = 100,
+                      seed.num = seed.array[rep],
+                      sf.rate = sf.array[sf],
+                      run.label = "pedfac.v.187",
+                      case.label = paste0("sf_",sf.array[sf]),
+                      rerun = FALSE)
+  })
+})
+
+#save(halfsib.sf.pedfac.187v, file = "/Users/thomasn/repo/pedigree-factor-graphs/data/ch2/fullsib/halfsib.sf.pedfac.187v")
 
 halfsib.nSNP.pedfac <- lapply(1:2, function(nSNP) {
   lapply(1:5, function (rep) {
